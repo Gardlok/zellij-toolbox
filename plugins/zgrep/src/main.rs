@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zellij_tile::prelude::actions::{Action, SearchDirection, SearchOption};
+use zellij_tile::prelude::actions::Action;
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -10,17 +10,33 @@ struct SearchResult {
     tab_index: usize,
     title: String,
     line_number: usize,
+    pane_rows: usize,
     text: String,
 }
 
 #[derive(Clone)]
 struct PendingJump {
     pane_id: u32,
+    target_top: usize,
+    page_steps_remaining: usize,
+    correction_steps_remaining: usize,
+    correction_direction: CorrectionDirection,
     query: String,
-    anchor: String,
     case_sensitive: bool,
-    anchor_steps_remaining: usize,
     request: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CorrectionDirection {
+    None,
+    Up,
+    Down,
+}
+
+impl Default for CorrectionDirection {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -83,10 +99,12 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
+    highlighted_pane: Option<u32>,
 }
 
 impl State {
     fn open(&mut self) {
+        self.clear_previous_highlight();
         self.pending_open = false;
         self.pending_jump = None;
         self.visible = true;
@@ -182,6 +200,7 @@ impl State {
                             tab_index,
                             title: pane.title.clone(),
                             line_number,
+                            pane_rows: pane.pane_content_rows.max(1),
                             text: line,
                         });
 
@@ -211,11 +230,7 @@ impl State {
         };
     }
 
-    fn native_search_compatible(value: &str) -> bool {
-        !value.is_empty() && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
-    }
-
-    fn resolve_jump_target(&self, result: &SearchResult) -> Option<(String, usize)> {
+    fn resolve_target_top(&self, result: &SearchResult) -> Option<usize> {
         let pane_id = PaneId::Terminal(result.pane_id);
         let contents = get_pane_scrollback(pane_id, true).ok()?;
 
@@ -227,26 +242,73 @@ impl State {
             return None;
         }
 
-        let selected_index = lines
-            .iter()
-            .enumerate()
-            .filter(|(_, line)| **line == result.text)
-            .min_by_key(|(index, _)| index.abs_diff(result.line_number))
-            .map(|(index, _)| index)
-            .unwrap_or(result.line_number.min(lines.len() - 1));
+        Some(
+            lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| **line == result.text)
+                .min_by_key(|(index, _)| index.abs_diff(result.line_number))
+                .map(|(index, _)| index)
+                .unwrap_or(result.line_number.min(lines.len() - 1)),
+        )
+    }
 
-        let anchor = lines[selected_index].trim_end().to_owned();
-        if !Self::native_search_compatible(&anchor) {
+    fn regex_escape_literal(value: &str) -> String {
+        let mut escaped = String::with_capacity(value.len());
+        for c in value.chars() {
+            if matches!(
+                c,
+                '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|'
+            ) {
+                escaped.push('\\');
+            }
+            escaped.push(c);
+        }
+        escaped
+    }
+
+    fn highlight_pattern(query: &str, case_sensitive: bool) -> Option<String> {
+        let query = query.trim();
+        if query.is_empty() {
             return None;
         }
 
-        let anchor_steps_from_bottom = lines[selected_index..]
-            .iter()
-            .map(|line| line.trim_end().match_indices(&anchor).count())
-            .sum::<usize>()
-            .max(1);
+        let escaped = Self::regex_escape_literal(query);
+        if case_sensitive {
+            Some(escaped)
+        } else {
+            Some(format!("(?i:{escaped})"))
+        }
+    }
 
-        Some((anchor, anchor_steps_from_bottom))
+    fn clear_previous_highlight(&mut self) {
+        if let Some(pane_id) = self.highlighted_pane.take() {
+            clear_pane_highlights(PaneId::Terminal(pane_id));
+        }
+    }
+
+    fn apply_highlight(&mut self, pane_id: u32, query: &str, case_sensitive: bool) {
+        self.clear_previous_highlight();
+
+        let Some(pattern) = Self::highlight_pattern(query, case_sensitive) else {
+            return;
+        };
+
+        set_pane_regex_highlights(
+            PaneId::Terminal(pane_id),
+            vec![RegexHighlight {
+                pattern,
+                style: HighlightStyle::BackgroundEmphasis0,
+                layer: HighlightLayer::ActionFeedback,
+                context: BTreeMap::new(),
+                on_hover: false,
+                bold: true,
+                italic: false,
+                underline: false,
+                tooltip_text: None,
+            }],
+        );
+        self.highlighted_pane = Some(pane_id);
     }
 
     fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
@@ -266,17 +328,8 @@ impl State {
             return;
         };
 
-        let query = self.query.trim().to_owned();
-        if !Self::native_search_compatible(&query) {
-            self.status = "Exact jump currently requires a printable ASCII query on Zellij 0.45.1."
-                .to_owned();
-            return;
-        }
-
-        let Some((anchor, anchor_steps_remaining)) = self.resolve_jump_target(&result) else {
-            self.status =
-                "Could not build a native-search anchor for that result; jump was not attempted."
-                    .to_owned();
+        let Some(target_top) = self.resolve_target_top(&result) else {
+            self.status = "Could not re-resolve that result in current scrollback.".to_owned();
             return;
         };
 
@@ -285,10 +338,12 @@ impl State {
 
         self.pending_jump = Some(PendingJump {
             pane_id: result.pane_id,
-            query,
-            anchor,
+            target_top,
+            page_steps_remaining: target_top / result.pane_rows,
+            correction_steps_remaining: 0,
+            correction_direction: CorrectionDirection::None,
+            query: self.query.trim().to_owned(),
             case_sensitive: self.case_sensitive,
-            anchor_steps_remaining,
             request,
         });
 
@@ -306,32 +361,54 @@ impl State {
         );
     }
 
-    fn run_anchor_seek(&self, request: u64) {
-        self.run_jump_action(
-            Action::Search {
-                direction: SearchDirection::Up,
-            },
-            request,
-            "seek-anchor",
-        );
+    fn run_next_page_step(&self, request: u64) {
+        self.run_jump_action(Action::PageScrollDown, request, "page");
     }
 
-    fn finish_anchor_seek(&self, request: u64) {
-        self.run_jump_action(
-            Action::SearchInput { input: vec![0] },
-            request,
-            "clear-query",
-        );
+    fn measure_and_begin_correction(&mut self, request: u64) {
+        let Some(pending) = self.pending_jump.as_mut() else {
+            return;
+        };
+
+        let pane_id = PaneId::Terminal(pending.pane_id);
+        let actual_top = get_pane_scrollback(pane_id, true)
+            .map(|contents| contents.lines_above_viewport.len())
+            .unwrap_or(pending.target_top);
+
+        if actual_top < pending.target_top {
+            pending.correction_direction = CorrectionDirection::Down;
+            pending.correction_steps_remaining = pending.target_top - actual_top;
+        } else if actual_top > pending.target_top {
+            pending.correction_direction = CorrectionDirection::Up;
+            pending.correction_steps_remaining = actual_top - pending.target_top;
+        } else {
+            pending.correction_direction = CorrectionDirection::None;
+            pending.correction_steps_remaining = 0;
+        }
+
+        self.run_next_correction_step_or_finish(request);
     }
 
-    fn set_final_query(&self, request: u64, query: String) {
-        self.run_jump_action(
-            Action::SearchInput {
-                input: query.into_bytes(),
-            },
-            request,
-            "set-query",
-        );
+    fn run_next_correction_step_or_finish(&mut self, request: u64) {
+        let Some(pending) = self.pending_jump.as_ref() else {
+            return;
+        };
+
+        if pending.correction_steps_remaining == 0 {
+            let pane_id = pending.pane_id;
+            let query = pending.query.clone();
+            let case_sensitive = pending.case_sensitive;
+            self.pending_jump = None;
+            self.apply_highlight(pane_id, &query, case_sensitive);
+            return;
+        }
+
+        let action = match pending.correction_direction {
+            CorrectionDirection::Up => Action::ScrollUp,
+            CorrectionDirection::Down => Action::ScrollDown,
+            CorrectionDirection::None => return,
+        };
+        self.run_jump_action(action, request, "correct");
     }
 
     fn handle_jump_action_complete(&mut self, context: BTreeMap<String, String>) -> bool {
@@ -357,66 +434,42 @@ impl State {
             return false;
         }
 
-        let pending_anchor = pending.anchor.clone();
-        let pending_query = pending.query.clone();
-        let pending_case_sensitive = pending.case_sensitive;
-
         match stage.as_str() {
             "focus" => {
-                self.run_jump_action(Action::ScrollToBottom, request, "bottom");
+                self.run_jump_action(Action::ScrollToTop, request, "top");
             }
-            "bottom" => {
-                self.run_jump_action(
-                    Action::SearchInput { input: vec![0] },
-                    request,
-                    "clear-anchor",
-                );
+            "top" => {
+                let page_steps = self
+                    .pending_jump
+                    .as_ref()
+                    .map(|pending| pending.page_steps_remaining)
+                    .unwrap_or(0);
+                if page_steps > 0 {
+                    self.run_next_page_step(request);
+                } else {
+                    self.measure_and_begin_correction(request);
+                }
             }
-            "clear-anchor" => {
-                self.run_jump_action(
-                    Action::SearchInput {
-                        input: pending_anchor.into_bytes(),
-                    },
-                    request,
-                    "set-anchor",
-                );
-            }
-            "set-anchor" => {
-                self.run_anchor_seek(request);
-            }
-            "seek-anchor" => {
+            "page" => {
                 let remaining = if let Some(pending) = self.pending_jump.as_mut() {
-                    pending.anchor_steps_remaining =
-                        pending.anchor_steps_remaining.saturating_sub(1);
-                    pending.anchor_steps_remaining
+                    pending.page_steps_remaining = pending.page_steps_remaining.saturating_sub(1);
+                    pending.page_steps_remaining
                 } else {
                     0
                 };
 
                 if remaining > 0 {
-                    self.run_anchor_seek(request);
+                    self.run_next_page_step(request);
                 } else {
-                    self.finish_anchor_seek(request);
+                    self.measure_and_begin_correction(request);
                 }
             }
-            "clear-query" => {
-                if pending_case_sensitive {
-                    self.set_final_query(request, pending_query.clone());
-                } else {
-                    self.run_jump_action(
-                        Action::SearchToggleOption {
-                            option: SearchOption::CaseSensitivity,
-                        },
-                        request,
-                        "case-insensitive",
-                    );
+            "correct" => {
+                if let Some(pending) = self.pending_jump.as_mut() {
+                    pending.correction_steps_remaining =
+                        pending.correction_steps_remaining.saturating_sub(1);
                 }
-            }
-            "case-insensitive" => {
-                self.set_final_query(request, pending_query.clone());
-            }
-            "set-query" => {
-                self.pending_jump = None;
+                self.run_next_correction_step_or_finish(request);
             }
             _ => {}
         }
@@ -592,7 +645,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down: select   Enter: native jump/highlight   c: case   s/Tab: scope   /: edit   Esc: close"
+                    "Up/Down: select   Enter: exact jump/highlight   c: case   s/Tab: scope   /: edit   Esc: close"
                 );
             }
         }
