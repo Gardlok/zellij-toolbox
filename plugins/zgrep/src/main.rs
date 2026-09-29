@@ -395,10 +395,6 @@ impl State {
         };
 
         if pending.correction_steps_remaining == 0 {
-            let pane_id = pending.pane_id;
-            let query = pending.query.clone();
-            let case_sensitive = pending.case_sensitive;
-            self.apply_highlight(pane_id, &query, case_sensitive);
             self.run_jump_action(
                 Action::SwitchToMode {
                     input_mode: InputMode::Scroll,
@@ -406,7 +402,6 @@ impl State {
                 request,
                 "scroll-mode",
             );
-            self.pending_jump = None;
             return;
         }
 
@@ -477,6 +472,15 @@ impl State {
                         pending.correction_steps_remaining.saturating_sub(1);
                 }
                 self.run_next_correction_step_or_finish(request);
+            }
+            "scroll-mode" => {
+                if let Some(pending) = self.pending_jump.take() {
+                    self.apply_highlight(
+                        pending.pane_id,
+                        &pending.query,
+                        pending.case_sensitive,
+                    );
+                }
             }
             _ => {}
         }
