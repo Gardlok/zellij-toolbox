@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use zellij_tile::prelude::actions::{Action, SearchDirection, SearchOption};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -9,8 +10,17 @@ struct SearchResult {
     tab_index: usize,
     title: String,
     line_number: usize,
-    pane_rows: usize,
     text: String,
+}
+
+#[derive(Clone)]
+struct PendingJump {
+    pane_id: u32,
+    query: String,
+    anchor: String,
+    case_sensitive: bool,
+    anchor_steps_remaining: usize,
+    request: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,14 +81,14 @@ struct State {
     scope: Scope,
     origin_tab: Option<usize>,
     origin_pane: Option<u32>,
-    highlight_on_jump: bool,
-    highlighted_pane: Option<u32>,
+    jump_request: u64,
+    pending_jump: Option<PendingJump>,
 }
 
 impl State {
     fn open(&mut self) {
-        self.clear_previous_highlight();
         self.pending_open = false;
+        self.pending_jump = None;
         self.visible = true;
         self.query.clear();
         self.results.clear();
@@ -86,7 +96,6 @@ impl State {
         self.mode = Mode::Query;
         self.case_sensitive = false;
         self.scope = Scope::All;
-        self.highlight_on_jump = true;
 
         match get_focused_pane_info() {
             Ok((tab_index, PaneId::Terminal(pane_id))) => {
@@ -173,7 +182,6 @@ impl State {
                             tab_index,
                             title: pane.title.clone(),
                             line_number,
-                            pane_rows: pane.pane_content_rows.max(1),
                             text: line,
                         });
 
@@ -203,124 +211,215 @@ impl State {
         };
     }
 
-    fn current_line_number(&self, result: &SearchResult) -> usize {
+    fn native_search_compatible(value: &str) -> bool {
+        !value.is_empty() && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+    }
+
+    fn resolve_jump_target(&self, result: &SearchResult) -> Option<(String, usize)> {
         let pane_id = PaneId::Terminal(result.pane_id);
-        let Ok(contents) = get_pane_scrollback(pane_id, true) else {
-            return result.line_number;
-        };
+        let contents = get_pane_scrollback(pane_id, true).ok()?;
 
         let mut lines = contents.lines_above_viewport;
         lines.extend(contents.viewport);
         lines.extend(contents.lines_below_viewport);
 
-        lines
+        if lines.is_empty() {
+            return None;
+        }
+
+        let selected_index = lines
             .iter()
             .enumerate()
             .filter(|(_, line)| **line == result.text)
             .min_by_key(|(index, _)| index.abs_diff(result.line_number))
             .map(|(index, _)| index)
-            .unwrap_or(result.line_number)
-    }
+            .unwrap_or(result.line_number.min(lines.len() - 1));
 
-    fn position_pane_at_line(&self, pane_id: PaneId, line_number: usize, pane_rows: usize) {
-        let target_top = line_number.saturating_sub(pane_rows / 2);
-        scroll_to_top_in_pane_id(pane_id);
-
-        let page_guess = pane_rows.saturating_sub(1).max(1);
-        for _ in 0..(target_top / page_guess) {
-            page_scroll_down_in_pane_id(pane_id);
-        }
-
-        let actual_top = get_pane_scrollback(pane_id, true)
-            .map(|contents| contents.lines_above_viewport.len())
-            .unwrap_or(0);
-
-        if actual_top < target_top {
-            for _ in 0..(target_top - actual_top) {
-                scroll_down_in_pane_id(pane_id);
-            }
-        } else {
-            for _ in 0..(actual_top - target_top) {
-                scroll_up_in_pane_id(pane_id);
-            }
-        }
-    }
-
-    fn regex_escape_literal(value: &str) -> String {
-        let mut escaped = String::with_capacity(value.len());
-        for c in value.chars() {
-            if matches!(
-                c,
-                '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|'
-            ) {
-                escaped.push('\\');
-            }
-            escaped.push(c);
-        }
-        escaped
-    }
-
-    fn highlight_pattern(&self) -> Option<String> {
-        let needle = self.query.trim();
-        if needle.is_empty() {
+        let anchor = lines[selected_index].trim_end().to_owned();
+        if !Self::native_search_compatible(&anchor) {
             return None;
         }
 
-        let escaped = Self::regex_escape_literal(needle);
-        if self.case_sensitive {
-            Some(escaped)
-        } else {
-            Some(format!("(?i:{escaped})"))
-        }
+        let anchor_steps_from_bottom = lines[selected_index..]
+            .iter()
+            .filter(|line| line.trim_end() == anchor)
+            .count()
+            .max(1);
+
+        Some((anchor, anchor_steps_from_bottom))
     }
 
-    fn clear_previous_highlight(&mut self) {
-        if let Some(pane_id) = self.highlighted_pane.take() {
-            clear_pane_highlights(PaneId::Terminal(pane_id));
-        }
+    fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("zgrep-op".to_owned(), "jump".to_owned()),
+            ("zgrep-request".to_owned(), request.to_string()),
+            ("zgrep-stage".to_owned(), stage.to_owned()),
+        ])
     }
 
-    fn apply_highlight(&mut self, pane_id: u32) {
-        self.clear_previous_highlight();
-
-        if !self.highlight_on_jump {
-            return;
-        }
-
-        let Some(pattern) = self.highlight_pattern() else {
-            return;
-        };
-
-        set_pane_regex_highlights(
-            PaneId::Terminal(pane_id),
-            vec![RegexHighlight {
-                pattern,
-                style: HighlightStyle::BackgroundEmphasis0,
-                layer: HighlightLayer::ActionFeedback,
-                context: BTreeMap::new(),
-                on_hover: false,
-                bold: true,
-                italic: false,
-                underline: false,
-                tooltip_text: None,
-            }],
-        );
-        self.highlighted_pane = Some(pane_id);
+    fn run_jump_action(&self, action: Action, request: u64, stage: &str) {
+        run_action(action, Self::jump_context(request, stage));
     }
 
-    fn jump_to_selected(&mut self) {
+    fn start_jump(&mut self) {
         let Some(result) = self.results.get(self.selected).cloned() else {
             return;
         };
 
-        let pane_id = PaneId::Terminal(result.pane_id);
-        let line_number = self.current_line_number(&result);
+        let query = self.query.trim().to_owned();
+        if !Self::native_search_compatible(&query) {
+            self.status =
+                "Exact jump currently requires a printable ASCII query on Zellij 0.45.1.".to_owned();
+            return;
+        }
+
+        let Some((anchor, anchor_steps_remaining)) = self.resolve_jump_target(&result) else {
+            self.status =
+                "Could not build a native-search anchor for that result; jump was not attempted."
+                    .to_owned();
+            return;
+        };
+
+        self.jump_request = self.jump_request.saturating_add(1);
+        let request = self.jump_request;
+
+        self.pending_jump = Some(PendingJump {
+            pane_id: result.pane_id,
+            query,
+            anchor,
+            case_sensitive: self.case_sensitive,
+            anchor_steps_remaining,
+            request,
+        });
+
         self.visible = false;
         hide_self();
 
-        focus_terminal_pane(result.pane_id, false, false);
-        self.position_pane_at_line(pane_id, line_number, result.pane_rows);
-        self.apply_highlight(result.pane_id);
+        self.run_jump_action(
+            Action::FocusTerminalPaneWithId {
+                pane_id: result.pane_id,
+                should_float_if_hidden: false,
+                should_be_in_place_if_hidden: false,
+            },
+            request,
+            "focus",
+        );
+    }
+
+    fn run_anchor_seek(&self, request: u64) {
+        self.run_jump_action(
+            Action::Search {
+                direction: SearchDirection::Up,
+            },
+            request,
+            "seek-anchor",
+        );
+    }
+
+    fn finish_anchor_seek(&self, request: u64) {
+        self.run_jump_action(
+            Action::SearchInput { input: vec![0] },
+            request,
+            "clear-query",
+        );
+    }
+
+    fn set_final_query(&self, request: u64, query: String) {
+        self.run_jump_action(
+            Action::SearchInput {
+                input: query.into_bytes(),
+            },
+            request,
+            "set-query",
+        );
+    }
+
+    fn handle_jump_action_complete(&mut self, context: BTreeMap<String, String>) -> bool {
+        if context.get("zgrep-op").map(String::as_str) != Some("jump") {
+            return false;
+        }
+
+        let Some(request) = context
+            .get("zgrep-request")
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+
+        let Some(stage) = context.get("zgrep-stage").cloned() else {
+            return false;
+        };
+
+        let Some(pending) = self.pending_jump.as_ref() else {
+            return false;
+        };
+        if pending.request != request {
+            return false;
+        }
+
+        match stage.as_str() {
+            "focus" => {
+                self.run_jump_action(Action::ScrollToBottom, request, "bottom");
+            }
+            "bottom" => {
+                self.run_jump_action(
+                    Action::SearchInput { input: vec![0] },
+                    request,
+                    "clear-anchor",
+                );
+            }
+            "clear-anchor" => {
+                let anchor = pending.anchor.clone();
+                self.run_jump_action(
+                    Action::SearchInput {
+                        input: anchor.into_bytes(),
+                    },
+                    request,
+                    "set-anchor",
+                );
+            }
+            "set-anchor" => {
+                self.run_anchor_seek(request);
+            }
+            "seek-anchor" => {
+                let remaining = if let Some(pending) = self.pending_jump.as_mut() {
+                    pending.anchor_steps_remaining =
+                        pending.anchor_steps_remaining.saturating_sub(1);
+                    pending.anchor_steps_remaining
+                } else {
+                    0
+                };
+
+                if remaining > 0 {
+                    self.run_anchor_seek(request);
+                } else {
+                    self.finish_anchor_seek(request);
+                }
+            }
+            "clear-query" => {
+                let case_sensitive = pending.case_sensitive;
+                if case_sensitive {
+                    self.set_final_query(request, pending.query.clone());
+                } else {
+                    self.run_jump_action(
+                        Action::SearchToggleOption {
+                            option: SearchOption::CaseSensitivity,
+                        },
+                        request,
+                        "case-insensitive",
+                    );
+                }
+            }
+            "case-insensitive" => {
+                self.set_final_query(request, pending.query.clone());
+            }
+            "set-query" => {
+                self.pending_jump = None;
+            }
+            _ => {}
+        }
+
+        false
     }
 
     fn cycle_scope(&mut self) {
@@ -330,13 +429,6 @@ impl State {
 
     fn toggle_case(&mut self) {
         self.case_sensitive = !self.case_sensitive;
-    }
-
-    fn toggle_highlight(&mut self) {
-        self.highlight_on_jump = !self.highlight_on_jump;
-        if !self.highlight_on_jump {
-            self.clear_previous_highlight();
-        }
     }
 
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
@@ -371,7 +463,7 @@ impl State {
                         self.selected = (self.selected + 1).min(self.results.len() - 1);
                     }
                 }
-                BareKey::Enter => self.jump_to_selected(),
+                BareKey::Enter => self.start_jump(),
                 BareKey::Char('/') => {
                     self.mode = Mode::Query;
                     self.results.clear();
@@ -382,7 +474,6 @@ impl State {
                     self.toggle_case();
                     self.search();
                 }
-                BareKey::Char('h') => self.toggle_highlight(),
                 BareKey::Char('s') | BareKey::Tab => {
                     self.cycle_scope();
                     self.search();
@@ -401,12 +492,14 @@ impl ZellijPlugin for State {
             EventType::Key,
             EventType::PaneUpdate,
             EventType::PermissionRequestResult,
+            EventType::ActionComplete,
         ]);
 
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ReadPaneContents,
             PermissionType::ChangeApplicationState,
+            PermissionType::RunActionsAsUser,
         ]);
     }
 
@@ -423,11 +516,15 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(PermissionStatus::Denied) => {
                 self.permissions_granted = false;
                 self.pending_open = false;
+                self.pending_jump = None;
                 false
             }
             Event::PaneUpdate(manifest) => {
                 self.pane_manifest = manifest;
                 self.visible
+            }
+            Event::ActionComplete(_action, _pane_id, context) => {
+                self.handle_jump_action_complete(context)
             }
             Event::Key(key) if self.visible => self.handle_key(key),
             _ => false,
@@ -451,7 +548,6 @@ impl ZellijPlugin for State {
         } else {
             "insensitive"
         };
-        let highlight = if self.highlight_on_jump { "on" } else { "off" };
 
         match self.mode {
             Mode::Query => {
@@ -464,12 +560,7 @@ impl ZellijPlugin for State {
             }
             Mode::Results => {
                 println!("Search: {}", self.query);
-                println!(
-                    "Scope: {}   Case: {}   Highlight on jump: {}",
-                    self.scope.label(),
-                    case,
-                    highlight
-                );
+                println!("Scope: {}   Case: {}", self.scope.label(), case);
                 println!("{}", self.status);
                 println!();
 
@@ -499,7 +590,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down: select   Enter: exact jump   h: highlight   c: case   s/Tab: scope   /: edit   Esc: close"
+                    "Up/Down: select   Enter: native jump/highlight   c: case   s/Tab: scope   /: edit   Esc: close"
                 );
             }
         }
