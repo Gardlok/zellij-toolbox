@@ -99,9 +99,9 @@ These are suggested defaults. Change them to fit your setup.
 
 Type a search term and press Enter. Results come from selectable terminal panes in the current Zellij session.
 
-Selecting a result re-resolves the chosen line against the pane's current retained scrollback, focuses that pane, scrolls to the top, then advances toward the selected row through Zellij actions sequenced by `ActionComplete`. After the coarse page moves finish, zgrep re-reads the pane's actual viewport position and corrects the remaining offset one line at a time. This avoids assuming that queued scroll commands have already taken effect.
+Selecting a result re-resolves the chosen line against the pane's current retained scrollback, focuses that pane, then positions the selected row near the vertical center through Zellij actions sequenced by `ActionComplete`. After the coarse page moves finish, zgrep re-reads the pane's actual viewport position and corrects the remaining offset one line at a time. This avoids assuming that queued scroll commands have already taken effect.
 
-Once the selected row is positioned at the top of the pane, zgrep applies a plugin-owned literal highlight for the current query and switches Zellij into Scroll mode. The terminal application's live cursor remains at the bottom of its output; Scroll mode makes it explicit that the client is viewing retained history. Use the normal Scroll-mode keys to move through history, and `Ctrl+C` to return to the live bottom/Normal mode. Regex metacharacters are escaped, and the highlight follows zgrep's current case-sensitive or case-insensitive mode. Case and scope controls remain `c` and `s`/Tab.
+Once the selected row is centered, zgrep switches Zellij into Scroll mode, clears any prior native search state, applies zgrep's case setting, and installs the query as Zellij's native search term. Because the target is already visible, native search supplies the visible highlight without owning navigation. The terminal application's live cursor remains at the bottom of its output; Scroll mode makes it explicit that the client is viewing retained history. Use the normal Scroll-mode keys to move through history, and `Ctrl+C` to return to the live bottom/Normal mode. Case and scope controls remain `c` and `s`/Tab.
 
 ### zmark
 
