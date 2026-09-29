@@ -9,6 +9,7 @@ struct State {
     pending_open: bool,
     visible: bool,
     lines: Vec<String>,
+    tabs: Vec<TabInfo>,
 }
 
 impl State {
@@ -19,10 +20,21 @@ impl State {
         match get_focused_pane_info() {
             Ok((tab_index, pane_id)) => {
                 self.lines.push(format!("Pane: {}", pane_id));
-                self.lines.push(format!("Tab position: {}", tab_index + 1));
+
+                if let Some(tab) = self.tabs.iter().find(|tab| tab.position == tab_index) {
+                    self.lines.push(format!(
+                        "Tab: {} (position {}, id {})",
+                        tab.name,
+                        tab.position + 1,
+                        tab.tab_id
+                    ));
+                } else {
+                    self.lines.push(format!("Tab position: {}", tab_index + 1));
+                }
 
                 if let Some(info) = get_pane_info(pane_id) {
-                    self.lines.push(format!("Title: {}", info.title));
+                    self.lines
+                        .push(format!("Pane name/title: {}", info.title));
                     self.lines.push(format!(
                         "Type: {}",
                         if info.is_plugin { "plugin" } else { "terminal" }
@@ -79,7 +91,11 @@ impl State {
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
-        subscribe(&[EventType::Key, EventType::PermissionRequestResult]);
+        subscribe(&[
+            EventType::Key,
+            EventType::TabUpdate,
+            EventType::PermissionRequestResult,
+        ]);
         request_permission(&[PermissionType::ReadApplicationState]);
     }
 
@@ -96,6 +112,10 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(PermissionStatus::Denied) => {
                 self.permissions_granted = false;
                 self.pending_open = false;
+                false
+            }
+            Event::TabUpdate(tabs) => {
+                self.tabs = tabs;
                 false
             }
             Event::Key(key) if self.visible => {
