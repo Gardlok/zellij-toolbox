@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use zellij_tile::prelude::*;
 use zellij_tile::prelude::actions::Action;
+use zellij_tile::prelude::*;
 
 register_plugin!(State);
 
@@ -33,7 +33,10 @@ impl State {
         let config_dir = env
             .get("ZELLIJ_CONFIG_DIR")
             .cloned()
-            .or_else(|| env.get("HOME").map(|home| format!("{}/.config/zellij", home)))
+            .or_else(|| {
+                env.get("HOME")
+                    .map(|home| format!("{}/.config/zellij", home))
+            })
             .unwrap_or_else(|| ".config/zellij".to_owned());
 
         self.plugin_dir = format!("{}/plugins/zellij-toolbox", config_dir);
