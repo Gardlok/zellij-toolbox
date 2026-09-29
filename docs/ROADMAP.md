@@ -21,9 +21,9 @@ The workspace uses a committed Cargo.lock and locked qualification/source builds
 
 Orion remains a second-machine qualification target; it is not a blocker for continued Midas development.
 
-## Current development: usability batch 2
+## Qualified usability batch 2
 
-Keep the existing architecture and dependency set while improving everyday interaction:
+Qualified and runtime-verified on Midas without changing the existing dependency set:
 
 - **zcommandpalette** — type-to-filter search and shortcut display
 - **zgrep** — all/current-tab/focused-pane scope plus case-sensitivity toggle
