@@ -268,8 +268,8 @@ impl State {
 
         let query = self.query.trim().to_owned();
         if !Self::native_search_compatible(&query) {
-            self.status =
-                "Exact jump currently requires a printable ASCII query on Zellij 0.45.1.".to_owned();
+            self.status = "Exact jump currently requires a printable ASCII query on Zellij 0.45.1."
+                .to_owned();
             return;
         }
 
