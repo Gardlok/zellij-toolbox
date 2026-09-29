@@ -473,7 +473,13 @@ impl State {
         };
 
         if pending.active_search_steps_remaining == 0 {
-            self.pending_jump = None;
+            self.run_jump_action(
+                Action::SwitchToMode {
+                    input_mode: InputMode::Search,
+                },
+                request,
+                "search-mode",
+            );
             return;
         }
 
@@ -596,6 +602,9 @@ impl State {
                         pending.active_search_steps_remaining.saturating_sub(1);
                 }
                 self.run_next_active_search_step(request);
+            }
+            "search-mode" => {
+                self.pending_jump = None;
             }
             _ => {}
         }
