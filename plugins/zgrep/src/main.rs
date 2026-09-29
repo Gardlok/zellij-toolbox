@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zellij_tile::prelude::actions::Action;
+use zellij_tile::prelude::actions::{Action, SearchOption};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -99,12 +99,10 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
-    highlighted_pane: Option<u32>,
 }
 
 impl State {
     fn open(&mut self) {
-        self.clear_previous_highlight();
         self.pending_open = false;
         self.pending_jump = None;
         self.visible = true;
@@ -242,73 +240,15 @@ impl State {
             return None;
         }
 
-        Some(
-            lines
-                .iter()
-                .enumerate()
-                .filter(|(_, line)| **line == result.text)
-                .min_by_key(|(index, _)| index.abs_diff(result.line_number))
-                .map(|(index, _)| index)
-                .unwrap_or(result.line_number.min(lines.len() - 1)),
-        )
-    }
+        let selected_index = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| **line == result.text)
+            .min_by_key(|(index, _)| index.abs_diff(result.line_number))
+            .map(|(index, _)| index)
+            .unwrap_or(result.line_number.min(lines.len() - 1));
 
-    fn regex_escape_literal(value: &str) -> String {
-        let mut escaped = String::with_capacity(value.len());
-        for c in value.chars() {
-            if matches!(
-                c,
-                '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|'
-            ) {
-                escaped.push('\\');
-            }
-            escaped.push(c);
-        }
-        escaped
-    }
-
-    fn highlight_pattern(query: &str, case_sensitive: bool) -> Option<String> {
-        let query = query.trim();
-        if query.is_empty() {
-            return None;
-        }
-
-        let escaped = Self::regex_escape_literal(query);
-        if case_sensitive {
-            Some(escaped)
-        } else {
-            Some(format!("(?i:{escaped})"))
-        }
-    }
-
-    fn clear_previous_highlight(&mut self) {
-        if let Some(pane_id) = self.highlighted_pane.take() {
-            clear_pane_highlights(PaneId::Terminal(pane_id));
-        }
-    }
-
-    fn apply_highlight(&mut self, pane_id: u32, query: &str, case_sensitive: bool) {
-        self.clear_previous_highlight();
-
-        let Some(pattern) = Self::highlight_pattern(query, case_sensitive) else {
-            return;
-        };
-
-        set_pane_regex_highlights(
-            PaneId::Terminal(pane_id),
-            vec![RegexHighlight {
-                pattern,
-                style: HighlightStyle::BackgroundEmphasis0,
-                layer: HighlightLayer::ActionFeedback,
-                context: BTreeMap::new(),
-                on_hover: false,
-                bold: true,
-                italic: false,
-                underline: false,
-                tooltip_text: None,
-            }],
-        );
-        self.highlighted_pane = Some(pane_id);
+        Some(selected_index.saturating_sub(result.pane_rows / 2))
     }
 
     fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
@@ -474,9 +414,48 @@ impl State {
                 self.run_next_correction_step_or_finish(request);
             }
             "scroll-mode" => {
-                if let Some(pending) = self.pending_jump.take() {
-                    self.apply_highlight(pending.pane_id, &pending.query, pending.case_sensitive);
+                self.run_jump_action(
+                    Action::SearchInput { input: vec![0] },
+                    request,
+                    "clear-search",
+                );
+            }
+            "clear-search" => {
+                let Some(pending) = self.pending_jump.as_ref() else {
+                    return false;
+                };
+                if pending.case_sensitive {
+                    self.run_jump_action(
+                        Action::SearchInput {
+                            input: pending.query.clone().into_bytes(),
+                        },
+                        request,
+                        "set-search",
+                    );
+                } else {
+                    self.run_jump_action(
+                        Action::SearchToggleOption {
+                            option: SearchOption::CaseSensitivity,
+                        },
+                        request,
+                        "case-insensitive",
+                    );
                 }
+            }
+            "case-insensitive" => {
+                let Some(pending) = self.pending_jump.as_ref() else {
+                    return false;
+                };
+                self.run_jump_action(
+                    Action::SearchInput {
+                        input: pending.query.clone().into_bytes(),
+                    },
+                    request,
+                    "set-search",
+                );
+            }
+            "set-search" => {
+                self.pending_jump = None;
             }
             _ => {}
         }
