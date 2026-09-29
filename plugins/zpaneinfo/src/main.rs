@@ -33,8 +33,7 @@ impl State {
                 }
 
                 if let Some(info) = get_pane_info(pane_id) {
-                    self.lines
-                        .push(format!("Pane name/title: {}", info.title));
+                    self.lines.push(format!("Pane name/title: {}", info.title));
                     self.lines.push(format!(
                         "Type: {}",
                         if info.is_plugin { "plugin" } else { "terminal" }
