@@ -290,14 +290,14 @@ impl ZellijPlugin for State {
                             return false;
                         }
 
-                        let updated_watch = if let Some(active_watch) = self.watches.get_mut(&pane_id)
-                        {
-                            active_watch.command = command;
-                            active_watch.phase = WatchPhase::WaitingForFinish;
-                            Some(active_watch.clone())
-                        } else {
-                            None
-                        };
+                        let updated_watch =
+                            if let Some(active_watch) = self.watches.get_mut(&pane_id) {
+                                active_watch.command = command;
+                                active_watch.phase = WatchPhase::WaitingForFinish;
+                                Some(active_watch.clone())
+                            } else {
+                                None
+                            };
 
                         if let Some(updated_watch) = updated_watch {
                             self.companion_publish(&updated_watch);
