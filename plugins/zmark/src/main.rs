@@ -8,6 +8,7 @@ struct Mark {
     pane_id: u32,
     tab_index: usize,
     title: String,
+    name: Option<String>,
     top_offset: usize,
     cursor_row: usize,
     anchor: String,
@@ -18,6 +19,7 @@ enum View {
     Hidden,
     Notice,
     List,
+    Rename,
 }
 
 impl Default for View {
@@ -34,6 +36,7 @@ struct State {
     marks: Vec<Mark>,
     selected: usize,
     notice: String,
+    rename_buffer: String,
 }
 
 impl State {
@@ -95,6 +98,7 @@ impl State {
             pane_id,
             tab_index,
             title,
+            name: None,
             top_offset: contents.lines_above_viewport.len(),
             cursor_row,
             anchor,
@@ -111,6 +115,24 @@ impl State {
         self.selected = self.selected.min(self.marks.len().saturating_sub(1));
         self.view = View::List;
         show_self(true);
+    }
+
+    fn begin_rename(&mut self) {
+        let Some(mark) = self.marks.get(self.selected) else {
+            return;
+        };
+
+        self.rename_buffer = mark.name.clone().unwrap_or_default();
+        self.view = View::Rename;
+    }
+
+    fn finish_rename(&mut self) {
+        let name = self.rename_buffer.trim().to_owned();
+        if let Some(mark) = self.marks.get_mut(self.selected) {
+            mark.name = if name.is_empty() { None } else { Some(name) };
+        }
+        self.rename_buffer.clear();
+        self.view = View::List;
     }
 
     fn jump_to_selected(&mut self) {
@@ -183,12 +205,25 @@ impl State {
                     }
                 }
                 BareKey::Enter => self.jump_to_selected(),
+                BareKey::Char('n') => self.begin_rename(),
                 BareKey::Char('d') => {
                     if !self.marks.is_empty() {
                         self.marks.remove(self.selected);
                         self.selected = self.selected.min(self.marks.len().saturating_sub(1));
                     }
                 }
+                _ => {}
+            },
+            View::Rename => match key.bare_key {
+                BareKey::Esc => {
+                    self.rename_buffer.clear();
+                    self.view = View::List;
+                }
+                BareKey::Enter => self.finish_rename(),
+                BareKey::Backspace => {
+                    self.rename_buffer.pop();
+                }
+                BareKey::Char(c) => self.rename_buffer.push(c),
                 _ => {}
             },
             View::Notice => {
@@ -282,10 +317,12 @@ impl ZellijPlugin for State {
                             " "
                         };
                         let anchor = mark.anchor.trim();
+                        let name = mark.name.as_deref().unwrap_or("(unnamed)");
                         let prefix = format!(
-                            "{} {}. T{} P{} {} — ",
+                            "{} {}. {} — T{} P{} {} — ",
                             marker,
                             absolute_index + 1,
+                            name,
                             mark.tab_index + 1,
                             mark.pane_id,
                             mark.title
@@ -297,7 +334,14 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!("Up/Down: select   Enter: jump   d: delete   Esc: close");
+                println!("Up/Down: select   Enter: jump   n: name/rename   d: delete   Esc: close");
+            }
+            View::Rename => {
+                println!("zmark — name bookmark");
+                println!();
+                println!("Name: {}", self.rename_buffer);
+                println!();
+                println!("Enter: save   Esc: cancel");
             }
             View::Hidden => {}
         }

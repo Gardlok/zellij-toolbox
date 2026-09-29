@@ -25,6 +25,37 @@ impl Default for Mode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    All,
+    CurrentTab,
+    FocusedPane,
+}
+
+impl Default for Scope {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl Scope {
+    fn next(self) -> Self {
+        match self {
+            Self::All => Self::CurrentTab,
+            Self::CurrentTab => Self::FocusedPane,
+            Self::FocusedPane => Self::All,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "all panes",
+            Self::CurrentTab => "current tab",
+            Self::FocusedPane => "focused pane",
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
     permissions_granted: bool,
@@ -36,6 +67,10 @@ struct State {
     selected: usize,
     mode: Mode,
     status: String,
+    case_sensitive: bool,
+    scope: Scope,
+    origin_tab: Option<usize>,
+    origin_pane: Option<u32>,
 }
 
 impl State {
@@ -46,6 +81,24 @@ impl State {
         self.results.clear();
         self.selected = 0;
         self.mode = Mode::Query;
+        self.case_sensitive = false;
+        self.scope = Scope::All;
+
+        match get_focused_pane_info() {
+            Ok((tab_index, PaneId::Terminal(pane_id))) => {
+                self.origin_tab = Some(tab_index);
+                self.origin_pane = Some(pane_id);
+            }
+            Ok((tab_index, _)) => {
+                self.origin_tab = Some(tab_index);
+                self.origin_pane = None;
+            }
+            Err(_) => {
+                self.origin_tab = None;
+                self.origin_pane = None;
+            }
+        }
+
         self.status = "Type a search term and press Enter.".to_owned();
         show_self(true);
     }
@@ -57,8 +110,25 @@ impl State {
         }
     }
 
+    fn pane_in_scope(&self, tab_index: usize, pane_id: u32) -> bool {
+        match self.scope {
+            Scope::All => true,
+            Scope::CurrentTab => self.origin_tab == Some(tab_index),
+            Scope::FocusedPane => self.origin_pane == Some(pane_id),
+        }
+    }
+
+    fn line_matches(&self, line: &str, needle: &str, folded_needle: &str) -> bool {
+        if self.case_sensitive {
+            line.contains(needle)
+        } else {
+            line.to_lowercase().contains(folded_needle)
+        }
+    }
+
     fn search(&mut self) {
-        let needle = self.query.trim().to_lowercase();
+        let needle = self.query.trim().to_owned();
+        let folded_needle = needle.to_lowercase();
         self.results.clear();
         self.selected = 0;
 
@@ -78,7 +148,8 @@ impl State {
             };
 
             for pane in panes {
-                if pane.is_plugin || !pane.is_selectable {
+                if pane.is_plugin || !pane.is_selectable || !self.pane_in_scope(tab_index, pane.id)
+                {
                     continue;
                 }
 
@@ -92,7 +163,7 @@ impl State {
                 lines.extend(contents.lines_below_viewport);
 
                 for (line_number, line) in lines.into_iter().enumerate() {
-                    if line.to_lowercase().contains(&needle) {
+                    if self.line_matches(&line, &needle, &folded_needle) {
                         self.results.push(SearchResult {
                             pane_id: pane.id,
                             tab_index,
@@ -120,7 +191,7 @@ impl State {
 
         self.mode = Mode::Results;
         self.status = if self.results.is_empty() {
-            "No matches. Press / to search again.".to_owned()
+            "No matches. Press / to edit the search.".to_owned()
         } else if self.results.len() >= MAX_RESULTS {
             format!("Showing first {} matches.", MAX_RESULTS)
         } else {
@@ -152,6 +223,15 @@ impl State {
         }
     }
 
+    fn cycle_scope(&mut self) {
+        self.scope = self.scope.next();
+        self.status = format!("Scope: {}.", self.scope.label());
+    }
+
+    fn toggle_case(&mut self) {
+        self.case_sensitive = !self.case_sensitive;
+    }
+
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
         if !key.has_no_modifiers() {
             return true;
@@ -164,6 +244,7 @@ impl State {
                     hide_self();
                 }
                 BareKey::Enter => self.search(),
+                BareKey::Tab => self.cycle_scope(),
                 BareKey::Backspace => {
                     self.query.pop();
                 }
@@ -189,6 +270,14 @@ impl State {
                     self.results.clear();
                     self.selected = 0;
                     self.status = "Edit the query and press Enter.".to_owned();
+                }
+                BareKey::Char('c') => {
+                    self.toggle_case();
+                    self.search();
+                }
+                BareKey::Char('s') | BareKey::Tab => {
+                    self.cycle_scope();
+                    self.search();
                 }
                 _ => {}
             },
@@ -249,20 +338,28 @@ impl ZellijPlugin for State {
         println!("zgrep");
         println!();
 
+        let case = if self.case_sensitive {
+            "sensitive"
+        } else {
+            "insensitive"
+        };
+
         match self.mode {
             Mode::Query => {
                 println!("Search: {}", self.query);
+                println!("Scope: {}   Case: {}", self.scope.label(), case);
                 println!();
                 println!("{}", self.status);
                 println!();
-                println!("Enter: search    Esc: close");
+                println!("Tab: scope   Enter: search   Esc: close");
             }
             Mode::Results => {
                 println!("Search: {}", self.query);
+                println!("Scope: {}   Case: {}", self.scope.label(), case);
                 println!("{}", self.status);
                 println!();
 
-                let available = rows.saturating_sub(7).max(1);
+                let available = rows.saturating_sub(8).max(1);
                 let start = self.selected.saturating_sub(available.saturating_sub(1));
                 let end = (start + available).min(self.results.len());
 
@@ -287,7 +384,9 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!("Up/Down: select   Enter: jump   /: new search   Esc: close");
+                println!(
+                    "Up/Down: select   Enter: jump   c: case   s/Tab: scope   /: edit   Esc: close"
+                );
             }
         }
     }

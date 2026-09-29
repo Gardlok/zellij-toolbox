@@ -1,28 +1,34 @@
 # Roadmap
 
-## Ready for qualification
+## Qualified baseline
+
+The first toolbox batch is qualified and installed on Midas against Zellij 0.45.1.
+
+Validated on Midas:
 
 - **zcopyall** — copy all retained scrollback
 - **zback** — native FocusLastPane binding
-- **zcopycmd** — native CopyLastCommandOutput binding
+- **zcopycmd** — native CopyLastCommandOutput binding with Bash OSC 133 integration
 - **zpaneinfo** — focused pane diagnostics
 - **zgrep** — session-wide retained-scrollback search
 - **zmark** — session-local scrollback bookmarks
 - **zdiffpane** — interactive two-pane output diff
 - **zbroadcast** — confirmed command broadcast to selected panes
-- **zalert** — notify on the next watched foreground-command change
+- **zalert** — one-shot foreground-command alerts
 - **zcommandpalette** — common launcher
 
-## Immediate next step
+The workspace uses a committed Cargo.lock and locked qualification/source builds.
 
-Qualify the whole batch on Midas and Orion:
+Orion remains a second-machine qualification target; it is not a blocker for continued Midas development.
 
-- compile every plugin against Zellij 0.45.1;
-- test permission prompts and keybindings;
-- fix API or UI issues found during use;
-- commit Cargo.lock;
-- switch qualification to --locked;
-- settle default keybindings.
+## Qualified usability batch 2
+
+Qualified and runtime-verified on Midas without changing the existing dependency set:
+
+- **zcommandpalette** — type-to-filter search and shortcut display
+- **zgrep** — all/current-tab/focused-pane scope plus case-sensitivity toggle
+- **zmark** — optional names for session bookmarks
+- **zalert** — arm at a shell prompt, detect the next foreground command, then alert when it finishes or changes
 
 ## Follow-up ideas
 
@@ -30,12 +36,10 @@ Qualify the whole batch on Midas and Orion:
 
 - better exact-line positioning
 - optional match highlighting
-- tab/pane filters
-- case and regex modes
+- regex mode
 
 ### zmark
 
-- named marks
 - optional persistence
 - faster exact restoration for very large offsets
 
@@ -51,7 +55,5 @@ An optional native companion can provide one view of watches across all local se
 
 ### zcommandpalette
 
-- searchable commands
-- discover installed toolbox plugins
-- show configured shortcuts
+- discover installed toolbox plugins dynamically
 - expose future companion features
