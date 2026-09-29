@@ -3,11 +3,18 @@ use zellij_tile::prelude::*;
 
 register_plugin!(State);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WatchPhase {
+    WaitingForCommand,
+    WaitingForFinish,
+}
+
 #[derive(Clone)]
 struct Watch {
     pane_id: u32,
     title: String,
     command: Vec<String>,
+    phase: WatchPhase,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,6 +49,26 @@ impl State {
             .unwrap_or_else(|| "zellij".to_owned());
     }
 
+    fn command_is_shell(command: &[String]) -> bool {
+        let Some(program) = command.first() else {
+            return true;
+        };
+
+        let program = program.rsplit('/').next().unwrap_or(program.as_str());
+        matches!(
+            program,
+            "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh" | "mksh"
+        )
+    }
+
+    fn command_label(command: &[String]) -> String {
+        if command.is_empty() {
+            "(unknown command)".to_owned()
+        } else {
+            command.join(" ")
+        }
+    }
+
     fn run_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
             return;
@@ -71,22 +98,34 @@ impl State {
             .map(|pane| pane.title)
             .unwrap_or_else(|| format!("pane {}", pane_id));
 
+        let phase = if Self::command_is_shell(&command) {
+            WatchPhase::WaitingForCommand
+        } else {
+            WatchPhase::WaitingForFinish
+        };
+
         self.watches.insert(
             pane_id,
             Watch {
                 pane_id,
                 title: title.clone(),
                 command: command.clone(),
+                phase,
             },
         );
 
-        let command = if command.is_empty() {
-            "(unknown command)".to_owned()
-        } else {
-            command.join(" ")
-        };
-
-        self.show_notice(format!("Watching {}: {}", title, command));
+        match phase {
+            WatchPhase::WaitingForCommand => {
+                self.show_notice(format!("Armed {} for the next command", title));
+            }
+            WatchPhase::WaitingForFinish => {
+                self.show_notice(format!(
+                    "Watching {}: {}",
+                    title,
+                    Self::command_label(&command)
+                ));
+            }
+        }
     }
 
     fn open_list(&mut self) {
@@ -101,12 +140,8 @@ impl State {
         set_timeout(1.4);
     }
 
-    fn notify_command_change(&self, watch: &Watch, new_command: &[String]) {
-        let old_command = if watch.command.is_empty() {
-            "(unknown)".to_owned()
-        } else {
-            watch.command.join(" ")
-        };
+    fn notify_command_finished(&self, watch: &Watch, new_command: &[String]) {
+        let old_command = Self::command_label(&watch.command);
         let new_command = if new_command.is_empty() {
             "(none)".to_owned()
         } else {
@@ -115,7 +150,7 @@ impl State {
 
         let summary = format!("zalert — {}", self.session_name);
         let body = format!(
-            "{} (pane {}) changed\n{}  →  {}",
+            "{} (pane {}) finished/changed\n{}  →  {}",
             watch.title, watch.pane_id, old_command, new_command
         );
 
@@ -167,14 +202,29 @@ impl ZellijPlugin for State {
                     return false;
                 };
 
-                if command != watch.command {
-                    self.notify_command_change(&watch, &command);
-                    self.watches.remove(&pane_id);
-                    if self.view == View::List {
-                        return true;
+                match watch.phase {
+                    WatchPhase::WaitingForCommand => {
+                        if Self::command_is_shell(&command) {
+                            return false;
+                        }
+
+                        if let Some(active_watch) = self.watches.get_mut(&pane_id) {
+                            active_watch.command = command;
+                            active_watch.phase = WatchPhase::WaitingForFinish;
+                        }
+
+                        self.view == View::List
+                    }
+                    WatchPhase::WaitingForFinish => {
+                        if command == watch.command {
+                            return false;
+                        }
+
+                        self.notify_command_finished(&watch, &command);
+                        self.watches.remove(&pane_id);
+                        self.view == View::List
                     }
                 }
-                false
             }
             Event::PaneClosed(PaneId::Terminal(pane_id)) => {
                 let removed = self.watches.remove(&pane_id).is_some();
@@ -230,17 +280,27 @@ impl ZellijPlugin for State {
                     println!("No panes are being watched.");
                 } else {
                     for watch in self.watches.values() {
-                        let command = if watch.command.is_empty() {
-                            "(unknown command)".to_owned()
-                        } else {
-                            watch.command.join(" ")
-                        };
-                        println!("P{} {} — {}", watch.pane_id, watch.title, command);
+                        match watch.phase {
+                            WatchPhase::WaitingForCommand => {
+                                println!(
+                                    "P{} {} — armed, waiting for next command",
+                                    watch.pane_id, watch.title
+                                );
+                            }
+                            WatchPhase::WaitingForFinish => {
+                                println!(
+                                    "P{} {} — watching {}",
+                                    watch.pane_id,
+                                    watch.title,
+                                    Self::command_label(&watch.command)
+                                );
+                            }
+                        }
                     }
                 }
 
                 println!();
-                println!("Alt+W toggles the focused pane. Esc/q: close");
+                println!("Alt+W arms/toggles the focused pane. Esc/q: close");
             }
             View::Hidden => {}
         }
