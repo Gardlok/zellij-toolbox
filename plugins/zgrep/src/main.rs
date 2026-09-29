@@ -357,6 +357,10 @@ impl State {
             return false;
         }
 
+        let pending_anchor = pending.anchor.clone();
+        let pending_query = pending.query.clone();
+        let pending_case_sensitive = pending.case_sensitive;
+
         match stage.as_str() {
             "focus" => {
                 self.run_jump_action(Action::ScrollToBottom, request, "bottom");
@@ -369,10 +373,9 @@ impl State {
                 );
             }
             "clear-anchor" => {
-                let anchor = pending.anchor.clone();
                 self.run_jump_action(
                     Action::SearchInput {
-                        input: anchor.into_bytes(),
+                        input: pending_anchor.into_bytes(),
                     },
                     request,
                     "set-anchor",
@@ -397,9 +400,8 @@ impl State {
                 }
             }
             "clear-query" => {
-                let case_sensitive = pending.case_sensitive;
-                if case_sensitive {
-                    self.set_final_query(request, pending.query.clone());
+                if pending_case_sensitive {
+                    self.set_final_query(request, pending_query.clone());
                 } else {
                     self.run_jump_action(
                         Action::SearchToggleOption {
@@ -411,7 +413,7 @@ impl State {
                 }
             }
             "case-insensitive" => {
-                self.set_final_query(request, pending.query.clone());
+                self.set_final_query(request, pending_query.clone());
             }
             "set-query" => {
                 self.pending_jump = None;
