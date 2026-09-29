@@ -186,10 +186,7 @@ impl State {
 
         let mut context = BTreeMap::new();
         context.insert("zalert-op".to_owned(), "global-list".to_owned());
-        context.insert(
-            "zalert-request".to_owned(),
-            self.global_request.to_string(),
-        );
+        context.insert("zalert-request".to_owned(), self.global_request.to_string());
 
         let generation = self.companion_generation.to_string();
         run_command(
@@ -644,9 +641,7 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!(
-                    "Up/Down: select   Enter: jump   r: refresh   l: local   Esc/q: close"
-                );
+                println!("Up/Down: select   Enter: jump   r: refresh   l: local   Esc/q: close");
             }
             View::Hidden => {}
         }
