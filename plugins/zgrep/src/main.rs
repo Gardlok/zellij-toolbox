@@ -71,10 +71,13 @@ struct State {
     scope: Scope,
     origin_tab: Option<usize>,
     origin_pane: Option<u32>,
+    highlight_on_jump: bool,
+    highlighted_pane: Option<u32>,
 }
 
 impl State {
     fn open(&mut self) {
+        self.clear_previous_highlight();
         self.pending_open = false;
         self.visible = true;
         self.query.clear();
@@ -83,6 +86,7 @@ impl State {
         self.mode = Mode::Query;
         self.case_sensitive = false;
         self.scope = Scope::All;
+        self.highlight_on_jump = true;
 
         match get_focused_pane_info() {
             Ok((tab_index, PaneId::Terminal(pane_id))) => {
@@ -199,28 +203,124 @@ impl State {
         };
     }
 
+    fn current_line_number(&self, result: &SearchResult) -> usize {
+        let pane_id = PaneId::Terminal(result.pane_id);
+        let Ok(contents) = get_pane_scrollback(pane_id, true) else {
+            return result.line_number;
+        };
+
+        let mut lines = contents.lines_above_viewport;
+        lines.extend(contents.viewport);
+        lines.extend(contents.lines_below_viewport);
+
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| **line == result.text)
+            .min_by_key(|(index, _)| index.abs_diff(result.line_number))
+            .map(|(index, _)| index)
+            .unwrap_or(result.line_number)
+    }
+
+    fn position_pane_at_line(&self, pane_id: PaneId, line_number: usize, pane_rows: usize) {
+        let target_top = line_number.saturating_sub(pane_rows / 2);
+        scroll_to_top_in_pane_id(pane_id);
+
+        let page_guess = pane_rows.saturating_sub(1).max(1);
+        for _ in 0..(target_top / page_guess) {
+            page_scroll_down_in_pane_id(pane_id);
+        }
+
+        let actual_top = get_pane_scrollback(pane_id, true)
+            .map(|contents| contents.lines_above_viewport.len())
+            .unwrap_or(0);
+
+        if actual_top < target_top {
+            for _ in 0..(target_top - actual_top) {
+                scroll_down_in_pane_id(pane_id);
+            }
+        } else {
+            for _ in 0..(actual_top - target_top) {
+                scroll_up_in_pane_id(pane_id);
+            }
+        }
+    }
+
+    fn regex_escape_literal(value: &str) -> String {
+        let mut escaped = String::with_capacity(value.len());
+        for c in value.chars() {
+            if matches!(
+                c,
+                '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|'
+            ) {
+                escaped.push('\\');
+            }
+            escaped.push(c);
+        }
+        escaped
+    }
+
+    fn highlight_pattern(&self) -> Option<String> {
+        let needle = self.query.trim();
+        if needle.is_empty() {
+            return None;
+        }
+
+        let escaped = Self::regex_escape_literal(needle);
+        if self.case_sensitive {
+            Some(escaped)
+        } else {
+            Some(format!("(?i:{escaped})"))
+        }
+    }
+
+    fn clear_previous_highlight(&mut self) {
+        if let Some(pane_id) = self.highlighted_pane.take() {
+            clear_pane_highlights(PaneId::Terminal(pane_id));
+        }
+    }
+
+    fn apply_highlight(&mut self, pane_id: u32) {
+        self.clear_previous_highlight();
+
+        if !self.highlight_on_jump {
+            return;
+        }
+
+        let Some(pattern) = self.highlight_pattern() else {
+            return;
+        };
+
+        set_pane_regex_highlights(
+            PaneId::Terminal(pane_id),
+            vec![RegexHighlight {
+                pattern,
+                style: HighlightStyle::BackgroundEmphasis0,
+                layer: HighlightLayer::ActionFeedback,
+                context: BTreeMap::new(),
+                on_hover: false,
+                bold: true,
+                italic: false,
+                underline: false,
+                tooltip_text: None,
+            }],
+        );
+        self.highlighted_pane = Some(pane_id);
+    }
+
     fn jump_to_selected(&mut self) {
         let Some(result) = self.results.get(self.selected).cloned() else {
             return;
         };
 
         let pane_id = PaneId::Terminal(result.pane_id);
+        let line_number = self.current_line_number(&result);
         self.visible = false;
         hide_self();
 
         focus_terminal_pane(result.pane_id, false, false);
-        scroll_to_top_in_pane_id(pane_id);
-
-        let page_size = result.pane_rows.saturating_sub(1).max(1);
-        let page_count = result.line_number / page_size;
-        let remainder = result.line_number % page_size;
-
-        for _ in 0..page_count {
-            page_scroll_down_in_pane_id(pane_id);
-        }
-        for _ in 0..remainder {
-            scroll_down_in_pane_id(pane_id);
-        }
+        self.position_pane_at_line(pane_id, line_number, result.pane_rows);
+        self.apply_highlight(result.pane_id);
     }
 
     fn cycle_scope(&mut self) {
@@ -230,6 +330,13 @@ impl State {
 
     fn toggle_case(&mut self) {
         self.case_sensitive = !self.case_sensitive;
+    }
+
+    fn toggle_highlight(&mut self) {
+        self.highlight_on_jump = !self.highlight_on_jump;
+        if !self.highlight_on_jump {
+            self.clear_previous_highlight();
+        }
     }
 
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
@@ -275,6 +382,7 @@ impl State {
                     self.toggle_case();
                     self.search();
                 }
+                BareKey::Char('h') => self.toggle_highlight(),
                 BareKey::Char('s') | BareKey::Tab => {
                     self.cycle_scope();
                     self.search();
@@ -343,6 +451,7 @@ impl ZellijPlugin for State {
         } else {
             "insensitive"
         };
+        let highlight = if self.highlight_on_jump { "on" } else { "off" };
 
         match self.mode {
             Mode::Query => {
@@ -355,7 +464,12 @@ impl ZellijPlugin for State {
             }
             Mode::Results => {
                 println!("Search: {}", self.query);
-                println!("Scope: {}   Case: {}", self.scope.label(), case);
+                println!(
+                    "Scope: {}   Case: {}   Highlight on jump: {}",
+                    self.scope.label(),
+                    case,
+                    highlight
+                );
                 println!("{}", self.status);
                 println!();
 
@@ -385,7 +499,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down: select   Enter: jump   c: case   s/Tab: scope   /: edit   Esc: close"
+                    "Up/Down: select   Enter: exact jump   h: highlight   c: case   s/Tab: scope   /: edit   Esc: close"
                 );
             }
         }
