@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "plugins/zcopyall",
+    "plugins/*",
 ]
 resolver = "2"
 
@@ -12,3 +12,8 @@ rust-version = "1.95"
 
 [workspace.dependencies]
 zellij-tile = "=0.45.1"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

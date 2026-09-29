@@ -1,37 +1,42 @@
 # Zellij Toolbox
 
-A growing set of small Zellij utilities for everyday terminal work.
+Small Zellij utilities for everyday terminal work.
 
-The goal is simple: make common Zellij jobs faster without duplicating features Zellij already provides.
+**Zellij baseline: 0.45.1 or newer.**
 
-**Baseline: Zellij 0.45.1 or newer.**
+## Included
 
-## What is here
+| Tool | What it does |
+| --- | --- |
+| **zcopyall** | Copy all retained scrollback from the focused pane |
+| **zback** | Jump back to the previously focused pane |
+| **zcopycmd** | Copy the output of the last shell command |
+| **zpaneinfo** | Show useful information about the focused pane |
+| **zgrep** | Search retained scrollback across panes in the current session |
+| **zmark** | Bookmark and return to places in pane scrollback |
+| **zdiffpane** | Compare the retained output of two panes |
+| **zbroadcast** | Safely send one command to selected panes |
+| **zalert** | Notify when a watched pane's foreground command changes |
+| **zcommandpalette** | Open the toolbox from one menu |
 
-| Tool | Status | What it does |
-| --- | --- | --- |
-| **zcopyall** | Working plugin | Copy all retained scrollback from the focused pane |
-| **zback** | Native binding | Jump back to the previously focused pane |
-| **zcopycmd** | Native binding | Copy the output of the last shell command |
-| **zgrep** | Planned | Search retained scrollback across panes |
-| **zmark** | Planned | Bookmark useful places in terminal history |
-| **zalert** | Planned | Watch work and notify when it finishes or changes |
-| **zdiffpane** | Planned | Compare the retained output of two panes |
-| **zbroadcast** | Planned | Send input to a chosen set of panes |
-| **zpaneinfo** | Planned | Show useful information about the current pane |
-| **zcommandpalette** | Planned | One launcher for the whole toolbox |
+`zback` and `zcopycmd` use native Zellij 0.45 actions. The rest are small WASM plugins.
 
-`zback` and `zcopycmd` use native Zellij 0.45 actions. They do not need their own plugins.
+## Requirements
 
-## Install
-
-You need:
+To **run** the installed toolbox:
 
 - Zellij 0.45.1 or newer
+
+To **build/install from this source checkout**:
+
 - Rust 1.95 or newer
 - Cargo and rustup
 
-Clone the repo and run the installer:
+Rust is a build-time requirement, not a toolbox runtime requirement. Future releases can provide prebuilt WASM files so Rust is not needed for installation.
+
+`zalert` uses `notify-send` for desktop notifications when it is available.
+
+## Install
 
 ```bash
 git clone https://github.com/Gardlok/zellij-toolbox.git
@@ -39,65 +44,68 @@ cd zellij-toolbox
 ./install.sh
 ```
 
-The installer checks your versions, builds `zcopyall`, installs the WASM plugin, and prints the exact Zellij keybindings for your machine.
+The installer checks versions, builds all plugins, installs them under `~/.config/zellij/plugins/zellij-toolbox/`, and prints one keybinding block to merge into your Zellij config.
 
-It does **not** rewrite your existing `config.kdl`.
+It does **not** edit `config.kdl` automatically.
 
-## First run
+The first time a plugin runs, Zellij may ask for the permissions that plugin needs.
 
-After installation, start `zcopyall` once from inside Zellij using the command printed by the installer.
-
-Zellij will ask for:
-
-- `ReadApplicationState`
-- `ReadPaneContents`
-- `WriteToClipboard`
-
-Grant those permissions.
-
-Then merge the printed bindings into your existing `keybinds` block.
-
-The default toolbox keys are:
+## Default keys
 
 ```text
-Alt+A   copy all retained pane scrollback
-Alt+B   jump back to the previous pane
-Alt+C   copy the last command output
+Alt+A          zcopyall
+Alt+B          zback
+Alt+C          zcopycmd
+Alt+D          zdiffpane
+Alt+G          zgrep
+Alt+M          add zmark
+Alt+Shift+M    list zmarks
+Alt+V          zpaneinfo
+Alt+W          toggle zalert
+Alt+Shift+W    list zalerts
+Alt+Shift+B    zbroadcast
+Alt+Space      zcommandpalette
 ```
 
-If your config uses `keybinds clear-defaults=true`, add the toolbox `shared_except "locked"` section inside that existing block.
+These are suggested defaults. Change them to fit your setup.
 
-## zcopyall
+## Notes
 
-`zcopyall` copies everything Zellij still retains for the focused pane, including text above the visible screen.
+### zgrep
 
-It cannot recover text that has already fallen out of Zellij's scrollback buffer.
+Type a search term and press Enter. Results come from selectable terminal panes in the current Zellij session. Selecting a result focuses that pane and moves toward the matching line in retained scrollback.
 
-## zcopycmd
+### zmark
 
-Zellij 0.45 understands shell command boundaries through shell integration and provides `CopyLastCommandOutput` directly.
+Marks are session-local. A mark stores the pane, scroll position, and an anchor line so it can usually return to the same area even after more output appears.
 
-`zcopycmd` is therefore a toolbox keybinding, not another plugin.
+### zdiffpane
 
-If your shell does not provide the prompt markers Zellij needs, command-aware copying may not work as expected.
+Select two panes. The first version compares up to the most recent 300 retained lines from each pane and lets you copy the diff.
 
-## zback
+### zbroadcast
 
-Zellij 0.45 provides `FocusLastPane` directly.
+Select target panes, type one command, review it, then press Enter again to send. The confirmation step is intentional.
 
-The toolbox simply gives it a memorable `Alt+B` binding.
+### zalert
+
+Use Alt+W while a long-running command is active. zalert watches for that pane's foreground command to change and then calls `notify-send`.
+
+Desktop notifications can appear while you are working in another Zellij session. Automatically jumping back to the originating session is planned for a later native companion.
+
+### zcommandpalette
+
+The palette is a common front door for the toolbox. `zback` stays on Alt+B because opening the palette itself changes focus history.
 
 ## Development
-
-Run the local qualification script:
 
 ```bash
 ./qualify.sh
 ```
 
-There is intentionally no GitHub Actions workflow yet. The project starts with simple local qualification and can add CI later if it becomes useful.
+This formats, checks, builds, and verifies every current WASM artifact locally.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned follow-up work.
 
 ## License
 

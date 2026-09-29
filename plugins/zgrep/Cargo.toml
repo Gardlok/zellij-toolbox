@@ -1,11 +1,11 @@
 [package]
-name = "zcopyall"
+name = "zgrep"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Copy all retained scrollback from the focused Zellij pane."
+description = "Search retained scrollback across panes in the current Zellij session."
 
 [dependencies]
 zellij-tile.workspace = true

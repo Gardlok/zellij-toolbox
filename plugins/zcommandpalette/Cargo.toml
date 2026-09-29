@@ -1,11 +1,11 @@
 [package]
-name = "zcopyall"
+name = "zcommandpalette"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Copy all retained scrollback from the focused Zellij pane."
+description = "A command palette for Gardlok Zellij Toolbox."
 
 [dependencies]
 zellij-tile.workspace = true

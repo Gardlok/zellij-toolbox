@@ -4,11 +4,20 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 PLUGIN_DIR="$CONFIG_DIR/plugins/zellij-toolbox"
-ZCOPYALL_PATH="$PLUGIN_DIR/zcopyall.wasm"
-
 MIN_ZELLIJ="0.45.1"
 MIN_RUST="1.95.0"
 WASM_TARGET="wasm32-wasip1"
+
+PLUGINS=(
+    zcopyall
+    zpaneinfo
+    zgrep
+    zmark
+    zdiffpane
+    zbroadcast
+    zalert
+    zcommandpalette
+)
 
 die() {
     printf 'zellij-toolbox: %s\n' "$*" >&2
@@ -22,9 +31,9 @@ version_at_least() {
 }
 
 command -v zellij >/dev/null 2>&1 || die "zellij is required"
-command -v rustc >/dev/null 2>&1 || die "rustc is required"
-command -v cargo >/dev/null 2>&1 || die "cargo is required"
-command -v rustup >/dev/null 2>&1 || die "rustup is required"
+command -v rustc >/dev/null 2>&1 || die "rustc is required for source installation"
+command -v cargo >/dev/null 2>&1 || die "cargo is required for source installation"
+command -v rustup >/dev/null 2>&1 || die "rustup is required for source installation"
 
 ZELLIJ_VERSION="$(zellij --version | awk '{print $2}')"
 RUST_VERSION="$(rustc --version | awk '{print $2}')"
@@ -33,52 +42,92 @@ version_at_least "$ZELLIJ_VERSION" "$MIN_ZELLIJ" ||
     die "Zellij $ZELLIJ_VERSION is too old; requires >= $MIN_ZELLIJ"
 
 version_at_least "$RUST_VERSION" "$MIN_RUST" ||
-    die "Rust $RUST_VERSION is too old; requires >= $MIN_RUST"
+    die "Rust $RUST_VERSION is too old for source build; requires >= $MIN_RUST"
 
 printf '==> Zellij %s\n' "$ZELLIJ_VERSION"
-printf '==> Rust %s\n' "$RUST_VERSION"
+printf '==> Rust %s (source build only)\n' "$RUST_VERSION"
 
 printf '==> Ensuring Rust target %s\n' "$WASM_TARGET"
 rustup target add "$WASM_TARGET"
 
-printf '==> Building zcopyall\n'
+printf '==> Building toolbox plugins\n'
 cd "$ROOT"
-cargo build --release --package zcopyall --target "$WASM_TARGET"
+cargo build --release --workspace --target "$WASM_TARGET"
 
-WASM="$ROOT/target/$WASM_TARGET/release/zcopyall.wasm"
-[[ -s "$WASM" ]] || die "zcopyall build completed without producing $WASM"
-
-printf '==> Installing zcopyall\n'
+printf '==> Installing toolbox plugins\n'
 mkdir -p "$PLUGIN_DIR"
-install -m 0644 "$WASM" "$ZCOPYALL_PATH"
-
-printf '\nInstalled:\n  %s\n\n' "$ZCOPYALL_PATH"
-
-printf '%s\n' 'First run, from inside Zellij:'
-printf '  zellij action start-or-reload-plugin "file:%s"\n\n' "$ZCOPYALL_PATH"
+for plugin in "${PLUGINS[@]}"; do
+    wasm="$ROOT/target/$WASM_TARGET/release/$plugin.wasm"
+    [[ -s "$wasm" ]] || die "missing build artifact: $wasm"
+    install -m 0644 "$wasm" "$PLUGIN_DIR/$plugin.wasm"
+    printf '    %s\n' "$PLUGIN_DIR/$plugin.wasm"
+done
 
 cat <<EOF
-Grant the three requested zcopyall permissions, then merge this into your existing keybinds block:
+
+Installed Zellij Toolbox plugins.
+
+Merge this section into your existing keybinds block.
+If you use keybinds clear-defaults=true, put it inside that block.
 
 shared_except "locked" {
     bind "Alt a" {
-        MessagePlugin "file:$ZCOPYALL_PATH" {
-            name "copy_all"
-        }
+        MessagePlugin "file:$PLUGIN_DIR/zcopyall.wasm" { name "copy_all" }
     }
 
-    bind "Alt b" {
-        FocusLastPane
+    bind "Alt b" { FocusLastPane }
+    bind "Alt c" { CopyLastCommandOutput }
+
+    bind "Alt d" {
+        MessagePlugin "file:$PLUGIN_DIR/zdiffpane.wasm" { name "open" }
     }
 
-    bind "Alt c" {
-        CopyLastCommandOutput
+    bind "Alt g" {
+        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" { name "open" }
+    }
+
+    bind "Alt m" {
+        MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" { name "mark" }
+    }
+    bind "Alt Shift m" {
+        MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" { name "open" }
+    }
+
+    bind "Alt v" {
+        MessagePlugin "file:$PLUGIN_DIR/zpaneinfo.wasm" { name "open" }
+    }
+
+    bind "Alt w" {
+        MessagePlugin "file:$PLUGIN_DIR/zalert.wasm" { name "watch" }
+    }
+    bind "Alt Shift w" {
+        MessagePlugin "file:$PLUGIN_DIR/zalert.wasm" { name "open" }
+    }
+
+    bind "Alt Shift b" {
+        MessagePlugin "file:$PLUGIN_DIR/zbroadcast.wasm" { name "open" }
+    }
+
+    bind "Alt Space" {
+        MessagePlugin "file:$PLUGIN_DIR/zcommandpalette.wasm" { name "open" }
     }
 }
 
-Alt+A  copy all retained pane scrollback
-Alt+B  jump back to the previous pane
-Alt+C  copy the last command output
+The first use of each plugin may trigger a Zellij permission prompt.
+
+Suggested keys:
+  Alt+A          copy all scrollback
+  Alt+B          previous pane
+  Alt+C          last command output
+  Alt+D          diff two panes
+  Alt+G          search pane history
+  Alt+M          add mark
+  Alt+Shift+M    list marks
+  Alt+V          pane info
+  Alt+W          toggle alert
+  Alt+Shift+W    list alerts
+  Alt+Shift+B    broadcast command
+  Alt+Space      command palette
 
 The installer does not edit config.kdl automatically.
 EOF

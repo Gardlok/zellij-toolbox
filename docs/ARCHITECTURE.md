@@ -1,63 +1,56 @@
 # Architecture
 
-Zellij Toolbox follows a few simple rules.
+## Baseline
 
-## Use Zellij first
+Zellij Toolbox currently targets Zellij 0.45.1 or newer.
 
-If Zellij already has a good native action, the toolbox should expose it with a useful convention instead of rewriting it.
+The installed WASM plugins do not require Rust at runtime. Rust 1.95 is required by the current source-build workflow because the toolbox is compiled against zellij-tile 0.45.1.
 
-That is why:
+A future release installer can use prebuilt WASM artifacts and remove Rust as an installation requirement.
+
+## Prefer native Zellij actions
+
+The toolbox does not reimplement features Zellij already provides well.
 
 - zback uses FocusLastPane
 - zcopycmd uses CopyLastCommandOutput
 
-## Use WASM plugins for session-local tools
+## Session-local plugins
 
-Tools that need Zellij pane state, scrollback, or UI should normally be small Zellij WASM plugins.
+The current WASM plugins are:
 
-zcopyall is the first example.
-
-Future likely WASM plugins include:
-
+- zcopyall
+- zpaneinfo
 - zgrep
 - zmark
 - zdiffpane
 - zbroadcast
-- zpaneinfo
+- zalert
 - zcommandpalette
 
-Shared Rust code should move into a common crate only when at least two real tools need it. The project will not create abstractions simply to have abstractions.
+They are separate so each utility can stay small and request only the permissions it needs.
 
-## Use a native companion only for machine-wide jobs
+Shared Rust code should be introduced only after multiple real plugins need the same behavior.
 
-A Zellij plugin belongs to one Zellij session.
+## zalert
 
-zalert is intended to watch work across multiple local Zellij sessions, so it may need a small native companion, zalertd, in addition to a session plugin.
+The first zalert implementation is session-local but can send desktop notifications through notify-send. Alerts can therefore remain visible while the user works in another Zellij session.
 
-The companion should remain optional. Users who only want the normal toolbox plugins should not need a daemon.
+A future optional native companion can add machine-wide watch management and direct jump/attach behavior back to the originating session and pane.
 
-## Baseline
+## Safety
 
-The current minimum supported Zellij version is 0.45.1.
-
-This baseline gives the toolbox:
-
-- full pane scrollback access
-- direct clipboard access
-- current client and pane information
-- session list access
-- FocusLastPane
-- command-aware scrollback actions such as CopyLastCommandOutput
-- newer plugin events that can support later tools such as zalert
-
-The current minimum Rust version is 1.95 because Zellij 0.45.1 and its plugin crate require it.
+zbroadcast does not blindly mirror keystrokes. It requires explicit pane selection, explicit command entry, and a second Enter confirmation before writing to any pane.
 
 ## Key conventions
 
-Initial defaults:
-
-- Alt+A — all: zcopyall
-- Alt+B — back: zback
-- Alt+C — command: zcopycmd
-
-Future bindings should stay memorable and avoid taking existing Zellij defaults when practical.
+- Alt+A — zcopyall
+- Alt+B — zback
+- Alt+C — zcopycmd
+- Alt+D — zdiffpane
+- Alt+G — zgrep
+- Alt+M / Alt+Shift+M — add/list zmark
+- Alt+V — zpaneinfo
+- Alt+W / Alt+Shift+W — toggle/list zalert
+- Alt+Shift+B — zbroadcast
+- Alt+Space — zcommandpalette
