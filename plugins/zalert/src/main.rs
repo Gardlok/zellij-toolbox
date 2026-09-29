@@ -36,17 +36,23 @@ struct State {
     pending_action: Option<String>,
     watches: BTreeMap<u32, Watch>,
     session_name: String,
+    companion_path: String,
     view: View,
     notice: String,
 }
 
 impl State {
-    fn refresh_session_name(&mut self) {
+    fn refresh_environment(&mut self) {
         let env = get_session_environment_variables();
         self.session_name = env
             .get("ZELLIJ_SESSION_NAME")
             .cloned()
             .unwrap_or_else(|| "zellij".to_owned());
+
+        self.companion_path = env
+            .get("HOME")
+            .map(|home| format!("{home}/.local/bin/zellij-toolbox-alert"))
+            .unwrap_or_else(|| "zellij-toolbox-alert".to_owned());
     }
 
     fn command_is_shell(command: &[String]) -> bool {
@@ -69,6 +75,55 @@ impl State {
         }
     }
 
+    fn companion_upsert(&self, watch: &Watch) {
+        let pane_id = watch.pane_id.to_string();
+        let phase = match watch.phase {
+            WatchPhase::WaitingForCommand => "armed",
+            WatchPhase::WaitingForFinish => "running",
+        };
+        let command = match watch.phase {
+            WatchPhase::WaitingForCommand => String::new(),
+            WatchPhase::WaitingForFinish => Self::command_label(&watch.command),
+        };
+
+        run_command(
+            &[
+                &self.companion_path,
+                "upsert",
+                &self.session_name,
+                &pane_id,
+                phase,
+                &watch.title,
+                &command,
+            ],
+            BTreeMap::new(),
+        );
+    }
+
+    fn companion_clear(&self, pane_id: u32) {
+        let pane_id = pane_id.to_string();
+        run_command(
+            &[
+                &self.companion_path,
+                "clear",
+                &self.session_name,
+                &pane_id,
+            ],
+            BTreeMap::new(),
+        );
+    }
+
+    fn companion_clear_session(&self) {
+        run_command(
+            &[
+                &self.companion_path,
+                "clear-session",
+                &self.session_name,
+            ],
+            BTreeMap::new(),
+        );
+    }
+
     fn run_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
             return;
@@ -88,6 +143,7 @@ impl State {
         };
 
         if self.watches.remove(&pane_id).is_some() {
+            self.companion_clear(pane_id);
             self.show_notice(format!("Stopped watching pane {}", pane_id));
             return;
         }
@@ -104,15 +160,15 @@ impl State {
             WatchPhase::WaitingForFinish
         };
 
-        self.watches.insert(
+        let watch = Watch {
             pane_id,
-            Watch {
-                pane_id,
-                title: title.clone(),
-                command: command.clone(),
-                phase,
-            },
-        );
+            title: title.clone(),
+            command: command.clone(),
+            phase,
+        };
+
+        self.watches.insert(pane_id, watch.clone());
+        self.companion_upsert(&watch);
 
         match phase {
             WatchPhase::WaitingForCommand => {
@@ -188,7 +244,8 @@ impl ZellijPlugin for State {
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permissions_granted = true;
-                self.refresh_session_name();
+                self.refresh_environment();
+                self.companion_clear_session();
                 self.run_pending();
                 true
             }
@@ -208,9 +265,17 @@ impl ZellijPlugin for State {
                             return false;
                         }
 
-                        if let Some(active_watch) = self.watches.get_mut(&pane_id) {
+                        let updated_watch = if let Some(active_watch) = self.watches.get_mut(&pane_id)
+                        {
                             active_watch.command = command;
                             active_watch.phase = WatchPhase::WaitingForFinish;
+                            Some(active_watch.clone())
+                        } else {
+                            None
+                        };
+
+                        if let Some(updated_watch) = updated_watch {
+                            self.companion_upsert(&updated_watch);
                         }
 
                         self.view == View::List
@@ -221,6 +286,7 @@ impl ZellijPlugin for State {
                         }
 
                         self.notify_command_finished(&watch, &command);
+                        self.companion_clear(pane_id);
                         self.watches.remove(&pane_id);
                         self.view == View::List
                     }
@@ -228,6 +294,9 @@ impl ZellijPlugin for State {
             }
             Event::PaneClosed(PaneId::Terminal(pane_id)) => {
                 let removed = self.watches.remove(&pane_id).is_some();
+                if removed {
+                    self.companion_clear(pane_id);
+                }
                 removed && self.view == View::List
             }
             Event::Timer(_) if self.view == View::Notice => {
