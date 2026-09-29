@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 PLUGIN_DIR="$CONFIG_DIR/plugins/zellij-toolbox"
+BIN_DIR="$HOME/.local/bin"
 MIN_ZELLIJ="0.45.1"
 MIN_RUST="1.95.0"
 WASM_TARGET="wasm32-wasip1"
@@ -37,6 +38,9 @@ command -v rustup >/dev/null 2>&1 || die "rustup is required for source installa
 
 ZELLIJ_VERSION="$(zellij --version | awk '{print $2}')"
 RUST_VERSION="$(rustc --version | awk '{print $2}')"
+HOST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+
+[[ -n "$HOST_TARGET" ]] || die "could not determine Rust host target"
 
 version_at_least "$ZELLIJ_VERSION" "$MIN_ZELLIJ" ||
     die "Zellij $ZELLIJ_VERSION is too old; requires >= $MIN_ZELLIJ"
@@ -46,13 +50,22 @@ version_at_least "$RUST_VERSION" "$MIN_RUST" ||
 
 printf '==> Zellij %s\n' "$ZELLIJ_VERSION"
 printf '==> Rust %s (source build only)\n' "$RUST_VERSION"
+printf '==> Native target %s\n' "$HOST_TARGET"
 
 printf '==> Ensuring Rust target %s\n' "$WASM_TARGET"
 rustup target add "$WASM_TARGET"
 
+PLUGIN_ARGS=()
+for plugin in "${PLUGINS[@]}"; do
+    PLUGIN_ARGS+=(-p "$plugin")
+done
+
 printf '==> Building toolbox plugins\n'
 cd "$ROOT"
-cargo build --locked --release --workspace --target "$WASM_TARGET"
+cargo build --locked --release --target "$WASM_TARGET" "${PLUGIN_ARGS[@]}"
+
+printf '==> Building zalert companion\n'
+cargo build --locked --release --target "$HOST_TARGET" -p zalertctl
 
 printf '==> Installing toolbox plugins\n'
 mkdir -p "$PLUGIN_DIR"
@@ -63,9 +76,16 @@ for plugin in "${PLUGINS[@]}"; do
     printf '    %s\n' "$PLUGIN_DIR/$plugin.wasm"
 done
 
+printf '==> Installing zalert companion\n'
+mkdir -p "$BIN_DIR"
+COMPANION_SRC="$ROOT/target/$HOST_TARGET/release/zellij-toolbox-alert"
+[[ -x "$COMPANION_SRC" ]] || die "missing companion artifact: $COMPANION_SRC"
+install -m 0755 "$COMPANION_SRC" "$BIN_DIR/zellij-toolbox-alert"
+printf '    %s\n' "$BIN_DIR/zellij-toolbox-alert"
+
 cat <<EOF
 
-Installed Zellij Toolbox plugins.
+Installed Zellij Toolbox plugins and zalert companion.
 
 Merge this section into your existing keybinds block.
 If you use keybinds clear-defaults=true, put it inside that block.
@@ -149,10 +169,14 @@ Suggested keys:
   Alt+M          add mark
   Alt+Shift+M    list marks
   Alt+V          pane info
-  Alt+W          toggle alert
-  Alt+Shift+W    list alerts
+  Alt+W          toggle/arm alert
+  Alt+Shift+W    list alerts in this session
   Alt+Shift+B    broadcast command
   Alt+;          command palette
 
-The installer does not edit config.kdl automatically.
+Cross-session alert companion:
+  $BIN_DIR/zellij-toolbox-alert list
+  $BIN_DIR/zellij-toolbox-alert jump N
+
+The installer does not edit config.kdl or shell startup files automatically.
 EOF
