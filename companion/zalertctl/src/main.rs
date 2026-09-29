@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -11,9 +11,17 @@ use std::time::Duration;
 struct Entry {
     session: String,
     pane_id: u32,
+    generation: u128,
+    revision: u64,
     phase: String,
     title: String,
     command: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct Snapshot {
+    session_generations: BTreeMap<String, u128>,
+    entries: Vec<Entry>,
 }
 
 struct StateLock {
@@ -28,7 +36,7 @@ impl Drop for StateLock {
 
 fn usage() -> ! {
     eprintln!(
-        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert upsert <session> <pane-id> <armed|running> <title> <command>\n  zellij-toolbox-alert reset-upsert <session> <pane-id> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id>\n  zellij-toolbox-alert clear-session <session>\n  zellij-toolbox-alert prune"
+        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert touch <session> <generation>\n  zellij-toolbox-alert upsert <session> <pane-id> <generation> <revision> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id> <generation> <revision>\n  zellij-toolbox-alert prune"
     );
     process::exit(2);
 }
@@ -120,54 +128,80 @@ fn decode(value: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-fn read_entries(path: &Path) -> io::Result<Vec<Entry>> {
+fn read_snapshot(path: &Path) -> io::Result<Snapshot> {
     let mut data = String::new();
     match File::open(path) {
         Ok(mut file) => {
             file.read_to_string(&mut data)?;
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Snapshot::default()),
         Err(error) => return Err(error),
     }
 
-    let mut entries = Vec::new();
+    let mut snapshot = Snapshot::default();
 
     for line in data.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() != 5 {
-            continue;
-        }
+        match fields.as_slice() {
+            ["S", session, generation] => {
+                let Some(session) = decode(session) else {
+                    continue;
+                };
+                let Ok(generation) = generation.parse::<u128>() else {
+                    continue;
+                };
+                snapshot.session_generations.insert(session, generation);
+            }
+            [
+                "W",
+                session,
+                pane_id,
+                generation,
+                revision,
+                phase,
+                title,
+                command,
+            ] => {
+                let Some(session) = decode(session) else {
+                    continue;
+                };
+                let Ok(pane_id) = pane_id.parse::<u32>() else {
+                    continue;
+                };
+                let Ok(generation) = generation.parse::<u128>() else {
+                    continue;
+                };
+                let Ok(revision) = revision.parse::<u64>() else {
+                    continue;
+                };
+                if !matches!(*phase, "armed" | "running" | "cleared") {
+                    continue;
+                }
+                let Some(title) = decode(title) else {
+                    continue;
+                };
+                let Some(command) = decode(command) else {
+                    continue;
+                };
 
-        let Some(session) = decode(fields[0]) else {
-            continue;
-        };
-        let Ok(pane_id) = fields[1].parse::<u32>() else {
-            continue;
-        };
-        let phase = fields[2].to_owned();
-        if phase != "armed" && phase != "running" {
-            continue;
+                snapshot.entries.push(Entry {
+                    session,
+                    pane_id,
+                    generation,
+                    revision,
+                    phase: (*phase).to_owned(),
+                    title,
+                    command,
+                });
+            }
+            _ => {}
         }
-        let Some(title) = decode(fields[3]) else {
-            continue;
-        };
-        let Some(command) = decode(fields[4]) else {
-            continue;
-        };
-
-        entries.push(Entry {
-            session,
-            pane_id,
-            phase,
-            title,
-            command,
-        });
     }
 
-    Ok(entries)
+    Ok(snapshot)
 }
 
-fn write_entries(dir: &Path, path: &Path, entries: &[Entry]) -> io::Result<()> {
+fn write_snapshot(dir: &Path, path: &Path, snapshot: &Snapshot) -> io::Result<()> {
     let temp = dir.join(format!("zalert-state.{}.tmp", process::id()));
 
     {
@@ -179,12 +213,25 @@ fn write_entries(dir: &Path, path: &Path, entries: &[Entry]) -> io::Result<()> {
             fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
         }
 
+        for (session, generation) in &snapshot.session_generations {
+            writeln!(file, "S\t{}\t{}", encode(session), generation)?;
+        }
+
+        let mut entries = snapshot.entries.clone();
+        entries.sort_by(|left, right| {
+            left.session
+                .cmp(&right.session)
+                .then(left.pane_id.cmp(&right.pane_id))
+        });
+
         for entry in entries {
             writeln!(
                 file,
-                "{}\t{}\t{}\t{}\t{}",
+                "W\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 encode(&entry.session),
                 entry.pane_id,
+                entry.generation,
+                entry.revision,
                 entry.phase,
                 encode(&entry.title),
                 encode(&entry.command)
@@ -218,137 +265,201 @@ fn active_sessions() -> Option<HashSet<String>> {
     )
 }
 
-fn prune(entries: &mut Vec<Entry>) -> bool {
+fn prune(snapshot: &mut Snapshot) -> bool {
     let Some(active) = active_sessions() else {
         return false;
     };
 
-    let before = entries.len();
-    entries.retain(|entry| active.contains(&entry.session));
-    entries.len() != before
+    let before_entries = snapshot.entries.len();
+    let before_sessions = snapshot.session_generations.len();
+
+    snapshot
+        .entries
+        .retain(|entry| active.contains(&entry.session));
+    snapshot
+        .session_generations
+        .retain(|session, _| active.contains(session));
+
+    snapshot.entries.len() != before_entries
+        || snapshot.session_generations.len() != before_sessions
 }
 
-fn with_locked_entries<T>(
-    action: impl FnOnce(&Path, &Path, &mut Vec<Entry>) -> io::Result<T>,
+fn with_locked_snapshot<T>(
+    action: impl FnOnce(&Path, &Path, &mut Snapshot) -> io::Result<T>,
 ) -> io::Result<T> {
     let dir = state_dir()?;
     let state = dir.join("zalert-state.tsv");
     let _lock = acquire_lock(&dir)?;
-    let mut entries = read_entries(&state)?;
-    action(&dir, &state, &mut entries)
+    let mut snapshot = read_snapshot(&state)?;
+    action(&dir, &state, &mut snapshot)
 }
 
-fn upsert(args: &[String]) -> io::Result<()> {
-    if args.len() != 5 {
-        usage();
+fn advance_session(snapshot: &mut Snapshot, session: &str, generation: u128) -> bool {
+    match snapshot.session_generations.get(session).copied() {
+        Some(current) if current > generation => false,
+        Some(current) if current == generation => true,
+        _ => {
+            snapshot
+                .session_generations
+                .insert(session.to_owned(), generation);
+            snapshot
+                .entries
+                .retain(|entry| entry.session != session || entry.generation >= generation);
+            true
+        }
     }
-
-    let session = args[0].clone();
-    let pane_id = args[1]
-        .parse::<u32>()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?;
-    let phase = args[2].clone();
-    if phase != "armed" && phase != "running" {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "phase must be armed or running",
-        ));
-    }
-
-    let title = args[3].clone();
-    let command = args[4].clone();
-
-    with_locked_entries(|dir, state, entries| {
-        entries.retain(|entry| !(entry.session == session && entry.pane_id == pane_id));
-        entries.push(Entry {
-            session,
-            pane_id,
-            phase,
-            title,
-            command,
-        });
-        entries.sort_by(|left, right| {
-            left.session
-                .cmp(&right.session)
-                .then(left.pane_id.cmp(&right.pane_id))
-        });
-        write_entries(dir, state, entries)
-    })
 }
 
-fn reset_upsert(args: &[String]) -> io::Result<()> {
-    if args.len() != 5 {
-        usage();
-    }
-
-    let session = args[0].clone();
-    let pane_id = args[1]
-        .parse::<u32>()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?;
-    let phase = args[2].clone();
-    if phase != "armed" && phase != "running" {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "phase must be armed or running",
-        ));
-    }
-
-    let title = args[3].clone();
-    let command = args[4].clone();
-
-    with_locked_entries(|dir, state, entries| {
-        entries.retain(|entry| entry.session != session);
-        entries.push(Entry {
-            session,
-            pane_id,
-            phase,
-            title,
-            command,
-        });
-        entries.sort_by(|left, right| {
-            left.session
-                .cmp(&right.session)
-                .then(left.pane_id.cmp(&right.pane_id))
-        });
-        write_entries(dir, state, entries)
-    })
-}
-
-fn clear(args: &[String]) -> io::Result<()> {
+fn touch(args: &[String]) -> io::Result<()> {
     if args.len() != 2 {
         usage();
     }
 
     let session = &args[0];
-    let pane_id = args[1]
-        .parse::<u32>()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?;
+    let generation = args[1]
+        .parse::<u128>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid generation"))?;
 
-    with_locked_entries(|dir, state, entries| {
-        entries.retain(|entry| !(entry.session == *session && entry.pane_id == pane_id));
-        write_entries(dir, state, entries)
+    with_locked_snapshot(|dir, state, snapshot| {
+        if advance_session(snapshot, session, generation) {
+            write_snapshot(dir, state, snapshot)?;
+        }
+        Ok(())
     })
 }
 
-fn clear_session(args: &[String]) -> io::Result<()> {
-    if args.len() != 1 {
+fn upsert(args: &[String]) -> io::Result<()> {
+    if args.len() != 7 {
         usage();
     }
 
-    let session = &args[0];
+    let session = args[0].clone();
+    let pane_id = args[1]
+        .parse::<u32>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?;
+    let generation = args[2]
+        .parse::<u128>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid generation"))?;
+    let revision = args[3]
+        .parse::<u64>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid revision"))?;
+    let phase = args[4].clone();
+    if phase != "armed" && phase != "running" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "phase must be armed or running",
+        ));
+    }
 
-    with_locked_entries(|dir, state, entries| {
-        entries.retain(|entry| entry.session != *session);
-        write_entries(dir, state, entries)
+    let title = args[5].clone();
+    let command = args[6].clone();
+
+    with_locked_snapshot(|dir, state, snapshot| {
+        if !advance_session(snapshot, &session, generation) {
+            return Ok(());
+        }
+
+        let should_apply = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.session == session && entry.pane_id == pane_id)
+            .map(|entry| {
+                entry.generation < generation
+                    || (entry.generation == generation && entry.revision < revision)
+            })
+            .unwrap_or(true);
+
+        if !should_apply {
+            return Ok(());
+        }
+
+        snapshot
+            .entries
+            .retain(|entry| !(entry.session == session && entry.pane_id == pane_id));
+        snapshot.entries.push(Entry {
+            session,
+            pane_id,
+            generation,
+            revision,
+            phase,
+            title,
+            command,
+        });
+        write_snapshot(dir, state, snapshot)
+    })
+}
+
+fn clear(args: &[String]) -> io::Result<()> {
+    if args.len() != 4 {
+        usage();
+    }
+
+    let session = args[0].clone();
+    let pane_id = args[1]
+        .parse::<u32>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?;
+    let generation = args[2]
+        .parse::<u128>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid generation"))?;
+    let revision = args[3]
+        .parse::<u64>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid revision"))?;
+
+    with_locked_snapshot(|dir, state, snapshot| {
+        if !advance_session(snapshot, &session, generation) {
+            return Ok(());
+        }
+
+        let should_apply = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.session == session && entry.pane_id == pane_id)
+            .map(|entry| {
+                entry.generation < generation
+                    || (entry.generation == generation && entry.revision < revision)
+            })
+            .unwrap_or(true);
+
+        if !should_apply {
+            return Ok(());
+        }
+
+        snapshot
+            .entries
+            .retain(|entry| !(entry.session == session && entry.pane_id == pane_id));
+        snapshot.entries.push(Entry {
+            session,
+            pane_id,
+            generation,
+            revision,
+            phase: "cleared".to_owned(),
+            title: String::new(),
+            command: String::new(),
+        });
+        write_snapshot(dir, state, snapshot)
     })
 }
 
 fn list_entries() -> io::Result<Vec<Entry>> {
-    with_locked_entries(|dir, state, entries| {
-        if prune(entries) {
-            write_entries(dir, state, entries)?;
+    with_locked_snapshot(|dir, state, snapshot| {
+        if prune(snapshot) {
+            write_snapshot(dir, state, snapshot)?;
         }
-        Ok(entries.clone())
+
+        let mut entries: Vec<Entry> = snapshot
+            .entries
+            .iter()
+            .filter(|entry| entry.phase != "cleared")
+            .cloned()
+            .collect();
+
+        entries.sort_by(|left, right| {
+            left.session
+                .cmp(&right.session)
+                .then(left.pane_id.cmp(&right.pane_id))
+        });
+
+        Ok(entries)
     })
 }
 
@@ -437,9 +548,9 @@ fn jump(args: &[String]) -> io::Result<()> {
 }
 
 fn prune_command() -> io::Result<()> {
-    with_locked_entries(|dir, state, entries| {
-        if prune(entries) {
-            write_entries(dir, state, entries)?;
+    with_locked_snapshot(|dir, state, snapshot| {
+        if prune(snapshot) {
+            write_snapshot(dir, state, snapshot)?;
         }
         Ok(())
     })
@@ -453,10 +564,9 @@ fn run() -> io::Result<()> {
     let rest: Vec<String> = args.collect();
 
     match command.as_str() {
+        "touch" => touch(&rest),
         "upsert" => upsert(&rest),
-        "reset-upsert" => reset_upsert(&rest),
         "clear" => clear(&rest),
-        "clear-session" => clear_session(&rest),
         "list" => {
             let entries = list_entries()?;
             print_entries(&entries);
