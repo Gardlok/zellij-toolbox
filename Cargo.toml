@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "plugins/*",
+    "companion/zalertctl",
 ]
 resolver = "2"
 
