@@ -103,7 +103,9 @@ Selecting a result re-resolves the chosen line against the pane's current retain
 
 Once the selected row is centered, zgrep switches Zellij into Scroll mode, clears prior native search state, applies zgrep's case setting, installs the query as Zellij's native search term, and advances the native active-search selection to the chosen result. This gives the selected term Zellij's stronger active-match marker while leaving navigation under zgrep's control. The terminal application's live shell cursor remains at the bottom of its output; it is not moved into retained history. Use the normal Scroll-mode keys to move through history, and `Ctrl+C` to return to the live bottom/Normal mode.
 
-While the zgrep dialog is open, press `Ctrl+F` to toggle the same plugin pane between floating and docked. Floating mode is resized to a centered 80% × 80% results window and uses a compact header so it shows a normal multi-line results list instead of collapsing to one result row. The chosen floating/docked preference is retained for later opens during that plugin instance. Case and scope controls remain `c` and `s`/Tab.
+While the zgrep dialog is open, press `Ctrl+F` to toggle the same plugin pane between floating and docked. Floating mode is resized to a centered 80% × 80% results window and uses a compact header so it shows a normal multi-line results list instead of collapsing to one result row. When moving from docked to floating, zgrep explicitly refocuses the same plugin pane so Zellij reveals the floating layer instead of leaving the ejected pane hidden. The chosen floating/docked preference is retained for later opens during that plugin instance.
+
+Search state is also retained while the plugin instance lives. After jumping to a result, press `Alt+G` again to resume the same query, buffered result list, selected row, case setting, and scope. In the results list, `n`/Down/`j` select the next result and `p`/Up/`k` select the previous result; Enter jumps again. Use `/` to return to query editing when you want a new search.
 
 ### zmark
 
