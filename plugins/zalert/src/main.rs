@@ -37,6 +37,7 @@ struct State {
     watches: BTreeMap<u32, Watch>,
     session_name: String,
     companion_path: String,
+    companion_initialized: bool,
     view: View,
     notice: String,
 }
@@ -75,7 +76,7 @@ impl State {
         }
     }
 
-    fn companion_upsert(&self, watch: &Watch) {
+    fn companion_publish(&mut self, watch: &Watch) {
         let pane_id = watch.pane_id.to_string();
         let phase = match watch.phase {
             WatchPhase::WaitingForCommand => "armed",
@@ -85,11 +86,16 @@ impl State {
             WatchPhase::WaitingForCommand => String::new(),
             WatchPhase::WaitingForFinish => Self::command_label(&watch.command),
         };
+        let action = if self.companion_initialized {
+            "upsert"
+        } else {
+            "reset-upsert"
+        };
 
         run_command(
             &[
                 &self.companion_path,
-                "upsert",
+                action,
                 &self.session_name,
                 &pane_id,
                 phase,
@@ -98,6 +104,8 @@ impl State {
             ],
             BTreeMap::new(),
         );
+
+        self.companion_initialized = true;
     }
 
     fn companion_clear(&self, pane_id: u32) {
@@ -113,7 +121,7 @@ impl State {
         );
     }
 
-    fn companion_clear_session(&self) {
+    fn companion_clear_session(&mut self) {
         run_command(
             &[
                 &self.companion_path,
@@ -122,6 +130,7 @@ impl State {
             ],
             BTreeMap::new(),
         );
+        self.companion_initialized = true;
     }
 
     fn run_pending(&mut self) {
@@ -168,7 +177,7 @@ impl State {
         };
 
         self.watches.insert(pane_id, watch.clone());
-        self.companion_upsert(&watch);
+        self.companion_publish(&watch);
 
         match phase {
             WatchPhase::WaitingForCommand => {
@@ -185,6 +194,9 @@ impl State {
     }
 
     fn open_list(&mut self) {
+        if !self.companion_initialized {
+            self.companion_clear_session();
+        }
         self.view = View::List;
         show_self(true);
     }
@@ -245,7 +257,7 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permissions_granted = true;
                 self.refresh_environment();
-                self.companion_clear_session();
+                self.companion_initialized = false;
                 self.run_pending();
                 true
             }
@@ -275,7 +287,7 @@ impl ZellijPlugin for State {
                         };
 
                         if let Some(updated_watch) = updated_watch {
-                            self.companion_upsert(&updated_watch);
+                            self.companion_publish(&updated_watch);
                         }
 
                         self.view == View::List
