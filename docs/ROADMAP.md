@@ -42,6 +42,17 @@ Qualified and runtime-verified on Midas. The first native companion milestone ke
 
 A daemon is intentionally deferred until there is a concrete need for background behavior beyond the plugin lifecycle.
 
+## Qualified in-Zellij global alert UI
+
+Qualified and runtime-verified on Midas without adding another service:
+
+- query shared cross-session watch state from the zalert WASM plugin through `RunCommandResult`;
+- expose a global-watch view from the local zalert list;
+- expose the global view through the searchable command palette;
+- refresh the global list on demand;
+- jump with Zellij's native session/pane switching API rather than invoking the helper for navigation;
+- ignore stale asynchronous refresh responses and stale session generations.
+
 ## Follow-up ideas
 
 ### zgrep

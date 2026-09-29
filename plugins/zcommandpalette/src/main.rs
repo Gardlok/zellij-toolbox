@@ -58,8 +58,13 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "zalert:list",
-        description: "Show active alerts",
+        description: "Show active alerts in this session",
         shortcut: "Alt+Shift+W",
+    },
+    Entry {
+        name: "zalert:global",
+        description: "Show alerts across local sessions",
+        shortcut: "palette",
     },
 ];
 
@@ -163,6 +168,7 @@ impl State {
             7 => self.send_plugin_message("zbroadcast", "open"),
             8 => self.send_plugin_message("zalert", "watch"),
             9 => self.send_plugin_message("zalert", "open"),
+            10 => self.send_plugin_message("zalert", "global"),
             _ => {}
         }
     }
@@ -281,10 +287,10 @@ impl ZellijPlugin for State {
                 } else {
                     " "
                 };
-                let key = if *entry_index == 9 {
-                    "0".to_owned()
-                } else {
-                    (*entry_index + 1).to_string()
+                let key = match *entry_index {
+                    0..=8 => (*entry_index + 1).to_string(),
+                    9 => "0".to_owned(),
+                    _ => "·".to_owned(),
                 };
                 println!(
                     "{} {}  {:<13} {:<11} {}",

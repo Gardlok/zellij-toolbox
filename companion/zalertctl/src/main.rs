@@ -36,7 +36,7 @@ impl Drop for StateLock {
 
 fn usage() -> ! {
     eprintln!(
-        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert touch <session> <generation>\n  zellij-toolbox-alert upsert <session> <pane-id> <generation> <revision> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id> <generation> <revision>\n  zellij-toolbox-alert prune"
+        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert list-machine <session> <generation>\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert touch <session> <generation>\n  zellij-toolbox-alert upsert <session> <pane-id> <generation> <revision> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id> <generation> <revision>\n  zellij-toolbox-alert prune"
     );
     process::exit(2);
 }
@@ -481,6 +481,62 @@ fn print_entries(entries: &[Entry]) {
     }
 }
 
+fn print_machine_entries(entries: &[Entry]) {
+    for entry in entries {
+        println!(
+            "{}\t{}\t{}\t{}\t{}",
+            encode(&entry.session),
+            entry.pane_id,
+            entry.phase,
+            encode(&entry.title),
+            encode(&entry.command)
+        );
+    }
+}
+
+fn list_machine(args: &[String]) -> io::Result<()> {
+    if args.len() != 2 {
+        usage();
+    }
+
+    let session = &args[0];
+    let generation = args[1]
+        .parse::<u128>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid generation"))?;
+
+    let entries = with_locked_snapshot(|dir, state, snapshot| {
+        let mut changed = false;
+
+        if advance_session(snapshot, session, generation) {
+            changed = true;
+        }
+        if prune(snapshot) {
+            changed = true;
+        }
+        if changed {
+            write_snapshot(dir, state, snapshot)?;
+        }
+
+        let mut entries: Vec<Entry> = snapshot
+            .entries
+            .iter()
+            .filter(|entry| entry.phase != "cleared")
+            .cloned()
+            .collect();
+
+        entries.sort_by(|left, right| {
+            left.session
+                .cmp(&right.session)
+                .then(left.pane_id.cmp(&right.pane_id))
+        });
+
+        Ok(entries)
+    })?;
+
+    print_machine_entries(&entries);
+    Ok(())
+}
+
 fn jump(args: &[String]) -> io::Result<()> {
     if args.len() != 1 {
         usage();
@@ -563,6 +619,7 @@ fn run() -> io::Result<()> {
             print_entries(&entries);
             Ok(())
         }
+        "list-machine" => list_machine(&rest),
         "jump" => jump(&rest),
         "prune" => prune_command(),
         _ => usage(),
