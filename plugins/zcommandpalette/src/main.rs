@@ -284,7 +284,7 @@ impl ZellijPlugin for State {
                 let key = if *entry_index == 9 {
                     "0".to_owned()
                 } else {
-                    (entry_index + 1).to_string()
+                    (*entry_index + 1).to_string()
                 };
                 println!(
                     "{} {}  {:<13} {:<11} {}",
