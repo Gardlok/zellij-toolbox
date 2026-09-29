@@ -99,11 +99,9 @@ These are suggested defaults. Change them to fit your setup.
 
 Type a search term and press Enter. Results come from selectable terminal panes in the current Zellij session.
 
-Selecting a result re-resolves the chosen line against the pane's current retained scrollback, then hands navigation to Zellij's native search engine. zgrep first searches for the complete selected line as an anchor so duplicate query matches elsewhere in the pane do not determine the destination. Once Zellij has reached that line, zgrep replaces the anchor with the original query, leaving the native search highlight visible on the selected result.
+Selecting a result re-resolves the chosen line against the pane's current retained scrollback, focuses that pane, scrolls to the top, then advances toward the selected row through Zellij actions sequenced by `ActionComplete`. After the coarse page moves finish, zgrep re-reads the pane's actual viewport position and corrects the remaining offset one line at a time. This avoids assuming that queued scroll commands have already taken effect.
 
-The handoff is sequenced through Zellij `ActionComplete` events rather than issuing scroll commands and immediately assuming they have taken effect. Case and scope controls remain `c` and `s`/Tab.
-
-Zellij 0.45.1's native search input accepts printable ASCII. zgrep can still discover non-ASCII matches, but exact native jump/highlight is currently limited to printable-ASCII queries and anchor lines.
+Once the selected row is positioned at the top of the pane, zgrep applies a plugin-owned literal highlight for the current query. Regex metacharacters are escaped, and the highlight follows zgrep's current case-sensitive or case-insensitive mode. Case and scope controls remain `c` and `s`/Tab.
 
 ### zmark
 
