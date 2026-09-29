@@ -475,11 +475,7 @@ impl State {
             }
             "scroll-mode" => {
                 if let Some(pending) = self.pending_jump.take() {
-                    self.apply_highlight(
-                        pending.pane_id,
-                        &pending.query,
-                        pending.case_sensitive,
-                    );
+                    self.apply_highlight(pending.pane_id, &pending.query, pending.case_sensitive);
                 }
             }
             _ => {}
