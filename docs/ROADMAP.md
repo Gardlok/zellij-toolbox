@@ -53,18 +53,18 @@ Qualified and runtime-verified on Midas without adding another service:
 - jump with Zellij's native session/pane switching API rather than invoking the helper for navigation;
 - ignore stale asynchronous refresh responses and stale session generations.
 
-## Current development: zgrep precision and native search handoff
+## Current development: zgrep precision and serialized positioning
 
 Improve zgrep navigation without changing its cross-pane discovery model or dependency set:
 
 - re-resolve a selected result against current scrollback before jumping;
-- use the complete selected line as a deterministic native-search anchor;
-- sequence focus, search reset, anchor search, occurrence selection, and final query through Zellij `ActionComplete` events;
-- leave final positioning and visible match highlighting to Zellij's native terminal search engine;
-- preserve zgrep's existing case and scope controls;
-- reject unsupported non-ASCII native-search handoffs without silently jumping to the wrong place.
+- focus the target pane and serialize scroll mutations through Zellij `ActionComplete` events;
+- start from the top, use page scrolling only as a coarse accelerator, then re-read the actual viewport offset;
+- correct any remaining offset one line at a time until the selected row is at the top of the pane;
+- apply a plugin-owned literal highlight only after positioning completes;
+- preserve zgrep's existing case and scope controls.
 
-The earlier fire-and-forget pane-scrolling/custom-highlight implementation failed runtime verification and was replaced before merge.
+Two earlier runtime candidates were rejected before merge: the first assumed fire-and-forget scroll commands had completed, and the second relied on native-search navigation that highlighted matches but did not move to the selected result.
 
 ## Follow-up ideas
 
