@@ -97,7 +97,11 @@ These are suggested defaults. Change them to fit your setup.
 
 ### zgrep
 
-Type a search term and press Enter. Results come from selectable terminal panes in the current Zellij session. Selecting a result focuses that pane and moves toward the matching line in retained scrollback.
+Type a search term and press Enter. Results come from selectable terminal panes in the current Zellij session.
+
+Selecting a result re-resolves that line against the pane's current retained scrollback, focuses the pane, coarse-scrolls toward the result, then corrects the remaining offset one line at a time so the match is positioned near the middle of the pane. This is more precise than relying on page-size estimates alone.
+
+By default, Enter also applies a Zellij-native highlight to literal matches for the current query in the target pane. Press `h` in the result list to toggle highlight-on-jump. Opening a new zgrep search clears the previous zgrep highlight. Case and scope controls remain `c` and `s`/Tab.
 
 ### zmark
 
