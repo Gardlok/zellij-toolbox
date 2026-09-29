@@ -754,7 +754,12 @@ impl ZellijPlugin for State {
                     println!("{}", self.status);
                 } else {
                     println!("Search: {}", self.query);
-                    println!("Scope: {}   Case: {}   View: {}", self.scope.label(), case, view);
+                    println!(
+                        "Scope: {}   Case: {}   View: {}",
+                        self.scope.label(),
+                        case,
+                        view
+                    );
                     println!("{}", self.status);
                     println!();
                 }
