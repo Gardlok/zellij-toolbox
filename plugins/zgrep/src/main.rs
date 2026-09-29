@@ -148,9 +148,7 @@ impl State {
             };
 
             for pane in panes {
-                if pane.is_plugin
-                    || !pane.is_selectable
-                    || !self.pane_in_scope(tab_index, pane.id)
+                if pane.is_plugin || !pane.is_selectable || !self.pane_in_scope(tab_index, pane.id)
                 {
                     continue;
                 }
