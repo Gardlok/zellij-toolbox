@@ -28,7 +28,7 @@ impl Drop for StateLock {
 
 fn usage() -> ! {
     eprintln!(
-        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert upsert <session> <pane-id> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id>\n  zellij-toolbox-alert clear-session <session>\n  zellij-toolbox-alert prune"
+        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert upsert <session> <pane-id> <armed|running> <title> <command>\n  zellij-toolbox-alert reset-upsert <session> <pane-id> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id>\n  zellij-toolbox-alert clear-session <session>\n  zellij-toolbox-alert prune"
     );
     process::exit(2);
 }
@@ -276,6 +276,44 @@ fn upsert(args: &[String]) -> io::Result<()> {
     })
 }
 
+fn reset_upsert(args: &[String]) -> io::Result<()> {
+    if args.len() != 5 {
+        usage();
+    }
+
+    let session = args[0].clone();
+    let pane_id = args[1]
+        .parse::<u32>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?;
+    let phase = args[2].clone();
+    if phase != "armed" && phase != "running" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "phase must be armed or running",
+        ));
+    }
+
+    let title = args[3].clone();
+    let command = args[4].clone();
+
+    with_locked_entries(|dir, state, entries| {
+        entries.retain(|entry| entry.session != session);
+        entries.push(Entry {
+            session,
+            pane_id,
+            phase,
+            title,
+            command,
+        });
+        entries.sort_by(|left, right| {
+            left.session
+                .cmp(&right.session)
+                .then(left.pane_id.cmp(&right.pane_id))
+        });
+        write_entries(dir, state, entries)
+    })
+}
+
 fn clear(args: &[String]) -> io::Result<()> {
     if args.len() != 2 {
         usage();
@@ -416,6 +454,7 @@ fn run() -> io::Result<()> {
 
     match command.as_str() {
         "upsert" => upsert(&rest),
+        "reset-upsert" => reset_upsert(&rest),
         "clear" => clear(&rest),
         "clear-session" => clear_session(&rest),
         "list" => {
