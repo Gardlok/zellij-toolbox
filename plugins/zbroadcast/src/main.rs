@@ -60,7 +60,8 @@ impl State {
         }
 
         let valid_ids: BTreeSet<u32> = self.choices.iter().map(|pane| pane.pane_id).collect();
-        self.selected_panes.retain(|pane_id| valid_ids.contains(pane_id));
+        self.selected_panes
+            .retain(|pane_id| valid_ids.contains(pane_id));
         self.selected_index = self
             .selected_index
             .min(self.choices.len().saturating_sub(1));
@@ -132,8 +133,7 @@ impl State {
                 }
                 BareKey::Down | BareKey::Char('j') => {
                     if !self.choices.is_empty() {
-                        self.selected_index =
-                            (self.selected_index + 1).min(self.choices.len() - 1);
+                        self.selected_index = (self.selected_index + 1).min(self.choices.len() - 1);
                     }
                 }
                 BareKey::Char(' ') => self.toggle_selected(),
@@ -160,8 +160,7 @@ impl State {
                         self.status = "Command is empty.".to_owned();
                     } else {
                         self.mode = Mode::Confirm;
-                        self.status =
-                            "Press Enter again to SEND, or Esc to edit.".to_owned();
+                        self.status = "Press Enter again to SEND, or Esc to edit.".to_owned();
                     }
                 }
                 BareKey::Char(c) => self.command.push(c),
