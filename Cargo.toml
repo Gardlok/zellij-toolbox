@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "plugins/zcopyall",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Gardlok/zellij-toolbox"
+rust-version = "1.95"
+
+[workspace.dependencies]
+zellij-tile = "=0.45.1"
