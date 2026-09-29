@@ -30,6 +30,18 @@ Qualified and runtime-verified on Midas without changing the existing dependency
 - **zmark** — optional names for session bookmarks
 - **zalert** — arm at a shell prompt, detect the next foreground command, then alert when it finishes or changes
 
+## Qualified cross-session zalert companion
+
+Qualified and runtime-verified on Midas. The first native companion milestone keeps zalert detection in the WASM plugin while adding a dependency-free host helper:
+
+- publish active watch state across local Zellij sessions;
+- list all active watches from one CLI;
+- jump from the current Zellij client to the originating session and pane;
+- prune dead-session state and reject stale asynchronous watch mutations;
+- preserve session-local zalert behavior if the helper is unavailable.
+
+A daemon is intentionally deferred until there is a concrete need for background behavior beyond the plugin lifecycle.
+
 ## Follow-up ideas
 
 ### zgrep
@@ -48,10 +60,6 @@ Qualified and runtime-verified on Midas without changing the existing dependency
 - configurable history limit
 - richer diff navigation
 - optional full-buffer comparison
-
-### zalert companion
-
-An optional native companion can provide one view of watches across all local sessions and direct attach/switch behavior back to the originating session and pane.
 
 ### zcommandpalette
 

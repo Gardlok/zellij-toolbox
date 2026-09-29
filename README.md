@@ -17,6 +17,7 @@ Small Zellij utilities for everyday terminal work.
 | **zdiffpane** | Compare the retained output of two panes |
 | **zbroadcast** | Safely send one command to selected panes |
 | **zalert** | Notify when a watched pane's foreground command changes |
+| **zalert companion** | List watches across local sessions and jump back to the originating pane |
 | **zcommandpalette** | Open the toolbox from one menu |
 
 `zback` and `zcopycmd` use native Zellij 0.45 actions. The rest are small WASM plugins.
@@ -36,7 +37,7 @@ To **build/install from this source checkout**:
 
 Rust is a build-time requirement, not a toolbox runtime requirement. Future releases can provide prebuilt WASM files so Rust is not needed for installation.
 
-`zalert` uses `notify-send` for desktop notifications when it is available.
+`zalert` uses `notify-send` for desktop notifications when it is available. Source installs also build a small native companion at `~/.local/bin/zellij-toolbox-alert`; the WASM alert plugin still works locally if that helper is unavailable.
 
 ## Install
 
@@ -116,7 +117,21 @@ Use Alt+W while a long-running command is active. zalert watches for that pane's
 
 A watch is intentionally one-shot: after it fires, it is removed. This avoids repeated notifications as the pane returns to a shell and starts later commands. Very short commands can finish before there is time to arm them.
 
-Desktop notifications can appear while you are working in another Zellij session. Automatically jumping back to the originating session is planned for a later native companion.
+Desktop notifications can appear while you are working in another Zellij session.
+
+The native companion keeps a shared view of active watches across local sessions:
+
+```bash
+~/.local/bin/zellij-toolbox-alert list
+```
+
+Each row has a numeric index. From inside any active Zellij client, jump directly to the originating session and pane with:
+
+```bash
+~/.local/bin/zellij-toolbox-alert jump 1
+```
+
+The helper prunes watches whose Zellij sessions are no longer running. Companion state is additive: if the helper is missing or fails, session-local zalert behavior continues to work.
 
 ### zcommandpalette
 
