@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zellij_tile::prelude::actions::{Action, SearchOption};
+use zellij_tile::prelude::actions::{Action, SearchDirection, SearchOption};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -23,6 +23,8 @@ struct PendingJump {
     correction_direction: CorrectionDirection,
     query: String,
     case_sensitive: bool,
+    active_search_direction: SearchDirection,
+    active_search_steps_remaining: usize,
     request: u64,
 }
 
@@ -99,6 +101,10 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
+    plugin_id: Option<u32>,
+    dialog_is_floating: bool,
+    floating_preference: Option<bool>,
+    pending_float_resize: bool,
 }
 
 impl State {
@@ -129,7 +135,9 @@ impl State {
         }
 
         self.status = "Type a search term and press Enter.".to_owned();
-        show_self(true);
+        let should_float = self.floating_preference.unwrap_or(true);
+        self.pending_float_resize = should_float;
+        show_self(should_float);
     }
 
     fn request_open(&mut self) {
@@ -228,7 +236,26 @@ impl State {
         };
     }
 
-    fn resolve_target_top(&self, result: &SearchResult) -> Option<usize> {
+    fn literal_occurrences(line: &str, query: &str, case_sensitive: bool) -> usize {
+        if query.is_empty() {
+            return 0;
+        }
+
+        if case_sensitive {
+            line.match_indices(query).count()
+        } else {
+            line.to_ascii_lowercase()
+                .match_indices(&query.to_ascii_lowercase())
+                .count()
+        }
+    }
+
+    fn resolve_jump_target(
+        &self,
+        result: &SearchResult,
+        query: &str,
+        case_sensitive: bool,
+    ) -> Option<(usize, SearchDirection, usize)> {
         let pane_id = PaneId::Terminal(result.pane_id);
         let contents = get_pane_scrollback(pane_id, true).ok()?;
 
@@ -248,7 +275,78 @@ impl State {
             .map(|(index, _)| index)
             .unwrap_or(result.line_number.min(lines.len() - 1));
 
-        Some(selected_index.saturating_sub(result.pane_rows / 2))
+        let target_top = selected_index.saturating_sub(result.pane_rows / 2);
+        let viewport_end = (target_top + result.pane_rows).min(lines.len());
+
+        let matches_before_target = lines[target_top..selected_index]
+            .iter()
+            .map(|line| Self::literal_occurrences(line, query, case_sensitive))
+            .sum::<usize>();
+        let target_occurrence = matches_before_target + 1;
+        let visible_matches = lines[target_top..viewport_end]
+            .iter()
+            .map(|line| Self::literal_occurrences(line, query, case_sensitive))
+            .sum::<usize>()
+            .max(target_occurrence);
+
+        let down_steps = target_occurrence;
+        let up_steps = visible_matches.saturating_sub(target_occurrence) + 1;
+
+        if down_steps <= up_steps {
+            Some((target_top, SearchDirection::Down, down_steps))
+        } else {
+            Some((target_top, SearchDirection::Up, up_steps))
+        }
+    }
+
+    fn own_pane_id(&self) -> Option<PaneId> {
+        self.plugin_id.map(PaneId::Plugin)
+    }
+
+    fn resize_floating_dialog(&mut self) {
+        let Some(pane_id) = self.own_pane_id() else {
+            return;
+        };
+
+        let coordinates = FloatingPaneCoordinates::default()
+            .with_x_percent(10)
+            .with_y_percent(10)
+            .with_width_percent(80)
+            .with_height_percent(80);
+        change_floating_panes_coordinates(vec![(pane_id, coordinates)]);
+        self.pending_float_resize = false;
+    }
+
+    fn refresh_dialog_state(&mut self) {
+        let Some(plugin_id) = self.plugin_id else {
+            return;
+        };
+
+        let pane_info = self
+            .pane_manifest
+            .panes
+            .values()
+            .flatten()
+            .find(|pane| pane.is_plugin && pane.id == plugin_id);
+
+        if let Some(pane_info) = pane_info {
+            self.dialog_is_floating = pane_info.is_floating;
+            if self.visible && self.dialog_is_floating && self.pending_float_resize {
+                self.resize_floating_dialog();
+            }
+        }
+    }
+
+    fn toggle_dialog_layer(&mut self) {
+        let Some(pane_id) = self.own_pane_id() else {
+            self.status = "Could not identify the zgrep pane.".to_owned();
+            return;
+        };
+
+        let target_floating = !self.dialog_is_floating;
+        self.floating_preference = Some(target_floating);
+        self.pending_float_resize = target_floating;
+        toggle_pane_embed_or_eject_for_pane_id(pane_id);
     }
 
     fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
@@ -268,7 +366,10 @@ impl State {
             return;
         };
 
-        let Some(target_top) = self.resolve_target_top(&result) else {
+        let query = self.query.trim().to_owned();
+        let Some((target_top, active_search_direction, active_search_steps_remaining)) =
+            self.resolve_jump_target(&result, &query, self.case_sensitive)
+        else {
             self.status = "Could not re-resolve that result in current scrollback.".to_owned();
             return;
         };
@@ -282,8 +383,10 @@ impl State {
             page_steps_remaining: target_top / result.pane_rows,
             correction_steps_remaining: 0,
             correction_direction: CorrectionDirection::None,
-            query: self.query.trim().to_owned(),
+            query,
             case_sensitive: self.case_sensitive,
+            active_search_direction,
+            active_search_steps_remaining,
             request,
         });
 
@@ -351,6 +454,25 @@ impl State {
             CorrectionDirection::None => return,
         };
         self.run_jump_action(action, request, "correct");
+    }
+
+    fn run_next_active_search_step(&mut self, request: u64) {
+        let Some(pending) = self.pending_jump.as_ref() else {
+            return;
+        };
+
+        if pending.active_search_steps_remaining == 0 {
+            self.pending_jump = None;
+            return;
+        }
+
+        self.run_jump_action(
+            Action::Search {
+                direction: pending.active_search_direction,
+            },
+            request,
+            "activate-search",
+        );
     }
 
     fn handle_jump_action_complete(&mut self, context: BTreeMap<String, String>) -> bool {
@@ -455,7 +577,14 @@ impl State {
                 );
             }
             "set-search" => {
-                self.pending_jump = None;
+                self.run_next_active_search_step(request);
+            }
+            "activate-search" => {
+                if let Some(pending) = self.pending_jump.as_mut() {
+                    pending.active_search_steps_remaining =
+                        pending.active_search_steps_remaining.saturating_sub(1);
+                }
+                self.run_next_active_search_step(request);
             }
             _ => {}
         }
@@ -473,6 +602,11 @@ impl State {
     }
 
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
+        if key.bare_key == BareKey::Char('f') && key.has_modifiers(&[KeyModifier::Ctrl]) {
+            self.toggle_dialog_layer();
+            return true;
+        }
+
         if !key.has_no_modifiers() {
             return true;
         }
@@ -529,6 +663,8 @@ impl State {
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
+        self.plugin_id = Some(get_plugin_ids().plugin_id);
+
         subscribe(&[
             EventType::Key,
             EventType::PaneUpdate,
@@ -562,6 +698,7 @@ impl ZellijPlugin for State {
             }
             Event::PaneUpdate(manifest) => {
                 self.pane_manifest = manifest;
+                self.refresh_dialog_state();
                 self.visible
             }
             Event::ActionComplete(_action, _pane_id, context) => {
@@ -597,15 +734,33 @@ impl ZellijPlugin for State {
                 println!();
                 println!("{}", self.status);
                 println!();
-                println!("Tab: scope   Enter: search   Esc: close");
+                println!("Tab: scope   Ctrl+F: float/dock   Enter: search   Esc: close");
             }
             Mode::Results => {
-                println!("Search: {}", self.query);
-                println!("Scope: {}   Case: {}", self.scope.label(), case);
-                println!("{}", self.status);
-                println!();
+                let view = if self.dialog_is_floating {
+                    "floating"
+                } else {
+                    "docked"
+                };
 
-                let available = rows.saturating_sub(8).max(1);
+                if self.dialog_is_floating {
+                    println!(
+                        "{} | {} | {} | {}",
+                        self.query,
+                        self.scope.label(),
+                        case,
+                        view
+                    );
+                    println!("{}", self.status);
+                } else {
+                    println!("Search: {}", self.query);
+                    println!("Scope: {}   Case: {}   View: {}", self.scope.label(), case, view);
+                    println!("{}", self.status);
+                    println!();
+                }
+
+                let reserved_rows = if self.dialog_is_floating { 6 } else { 8 };
+                let available = rows.saturating_sub(reserved_rows).max(1);
                 let start = self.selected.saturating_sub(available.saturating_sub(1));
                 let end = (start + available).min(self.results.len());
 
@@ -631,7 +786,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down: select   Enter: exact jump/highlight   c: case   s/Tab: scope   /: edit   Esc: close"
+                    "Up/Down: select  Enter: center/select  Ctrl+F: float/dock  c: case  s/Tab: scope  /: edit  Esc: close"
                 );
             }
         }
