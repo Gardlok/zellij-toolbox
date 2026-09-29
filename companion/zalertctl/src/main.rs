@@ -36,7 +36,7 @@ impl Drop for StateLock {
 
 fn usage() -> ! {
     eprintln!(
-        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert touch <session> <generation>\n  zellij-toolbox-alert upsert <session> <pane-id> <generation> <revision> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id> <generation> <revision>\n  zellij-toolbox-alert prune"
+        "Usage:\n  zellij-toolbox-alert list\n  zellij-toolbox-alert list-machine\n  zellij-toolbox-alert jump <index>\n  zellij-toolbox-alert touch <session> <generation>\n  zellij-toolbox-alert upsert <session> <pane-id> <generation> <revision> <armed|running> <title> <command>\n  zellij-toolbox-alert clear <session> <pane-id> <generation> <revision>\n  zellij-toolbox-alert prune"
     );
     process::exit(2);
 }
@@ -481,6 +481,19 @@ fn print_entries(entries: &[Entry]) {
     }
 }
 
+fn print_machine_entries(entries: &[Entry]) {
+    for entry in entries {
+        println!(
+            "{}\t{}\t{}\t{}\t{}",
+            encode(&entry.session),
+            entry.pane_id,
+            entry.phase,
+            encode(&entry.title),
+            encode(&entry.command)
+        );
+    }
+}
+
 fn jump(args: &[String]) -> io::Result<()> {
     if args.len() != 1 {
         usage();
@@ -561,6 +574,11 @@ fn run() -> io::Result<()> {
         "list" => {
             let entries = list_entries()?;
             print_entries(&entries);
+            Ok(())
+        }
+        "list-machine" => {
+            let entries = list_entries()?;
+            print_machine_entries(&entries);
             Ok(())
         }
         "jump" => jump(&rest),
