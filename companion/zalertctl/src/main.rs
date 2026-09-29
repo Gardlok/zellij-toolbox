@@ -72,6 +72,17 @@ fn acquire_lock(dir: &Path) -> io::Result<StateLock> {
                 return Ok(StateLock { path });
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let stale = fs::metadata(&path)
+                    .and_then(|metadata| metadata.modified())
+                    .and_then(|modified| modified.elapsed().map_err(io::Error::other))
+                    .map(|age| age > Duration::from_secs(10))
+                    .unwrap_or(false);
+
+                if stale {
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
+
                 thread::sleep(Duration::from_millis(10));
             }
             Err(error) => return Err(error),
@@ -355,9 +366,14 @@ fn jump(args: &[String]) -> io::Result<()> {
     };
 
     let pane = format!("terminal_{}", entry.pane_id);
-    let current_session = env::var("ZELLIJ_SESSION_NAME").ok();
+    let current_session = env::var("ZELLIJ_SESSION_NAME").map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "jump must be run from inside an active Zellij client",
+        )
+    })?;
 
-    let status = if current_session.as_deref() == Some(entry.session.as_str()) {
+    let status = if current_session == entry.session {
         Command::new("zellij")
             .args(["action", "focus-pane-id", &pane])
             .status()?
