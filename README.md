@@ -131,6 +131,10 @@ Each row has a numeric index. From inside any active Zellij client, jump directl
 ~/.local/bin/zellij-toolbox-alert jump 1
 ```
 
+The same cross-session view is available inside Zellij. Open the session-local alert list with Alt+Shift+W and press `g`, or open the command palette with Alt+; and search for `zalert:global`. In the global view, use Up/Down to select, Enter to jump, `r` to refresh, and `l` to return to the current-session list.
+
+The global UI uses Zellij's native session switching API; the companion is only used to read shared watch state. A first use after upgrading may request the additional Zellij permission needed to change application state.
+
 The helper prunes watches whose Zellij sessions are no longer running. Companion state is additive: if the helper is missing or fails, session-local zalert behavior continues to work.
 
 ### zcommandpalette
