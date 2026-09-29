@@ -22,10 +22,10 @@ printf '\n[1/4] formatting\n'
 cargo fmt --all -- --check
 
 printf '\n[2/4] workspace check\n'
-cargo check --workspace --target "$TARGET"
+cargo check --locked --workspace --target "$TARGET"
 
 printf '\n[3/4] release build\n'
-cargo build --release --workspace --target "$TARGET"
+cargo build --locked --release --workspace --target "$TARGET"
 
 printf '\n[4/4] artifacts\n'
 for plugin in "${PLUGINS[@]}"; do

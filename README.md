@@ -52,6 +52,27 @@ It does **not** edit `config.kdl` automatically.
 
 The first time a plugin runs, Zellij may ask for the permissions that plugin needs.
 
+### Bash shell integration for Alt+C
+
+`zcopycmd` uses Zellij's native `CopyLastCommandOutput` action. Bash needs OSC 133 prompt markers so Zellij can distinguish prompts, commands, and command output.
+
+The following integration was qualified on Midas with Zellij 0.45.1:
+
+```bash
+# Zellij OSC 133 shell integration
+if [[ -n "${ZELLIJ:-}" ]]; then
+    __zellij_osc133_prompt() {
+        local status=$?
+        printf '\e]133;D;%d\a\e]133;A\a' "$status"
+    }
+
+    PROMPT_COMMAND="__zellij_osc133_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    PS0="$(printf '\033]133;C\a')"
+fi
+```
+
+Add it to `~/.bashrc`, then start a fresh Bash shell or run `source ~/.bashrc`. The installer intentionally does not modify shell startup files.
+
 ## Default keys
 
 ```text
@@ -107,7 +128,7 @@ The palette is a common front door for the toolbox. The suggested key is `Alt+;`
 ./qualify.sh
 ```
 
-This formats, checks, builds, and verifies every current WASM artifact locally.
+This formats, checks, builds, and verifies every current WASM artifact locally using the committed `Cargo.lock`.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for planned follow-up work.
 
