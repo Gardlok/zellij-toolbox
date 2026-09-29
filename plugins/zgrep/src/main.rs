@@ -357,10 +357,7 @@ impl State {
         self.floating_preference = Some(target_floating);
         self.pending_float_resize = target_floating;
         toggle_pane_embed_or_eject_for_pane_id(pane_id);
-
-        if target_floating {
-            focus_plugin_pane(plugin_id, true, false);
-        }
+        focus_plugin_pane(plugin_id, target_floating, false);
     }
 
     fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
@@ -615,6 +612,21 @@ impl State {
         self.case_sensitive = !self.case_sensitive;
     }
 
+    fn edit_query(&mut self) {
+        self.mode = Mode::Query;
+        self.results.clear();
+        self.selected = 0;
+        self.status = "Edit the query and press Enter.".to_owned();
+    }
+
+    fn reset_search(&mut self) {
+        self.query.clear();
+        self.results.clear();
+        self.selected = 0;
+        self.mode = Mode::Query;
+        self.status = "Search cleared. Type a new term and press Enter.".to_owned();
+    }
+
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
         if key.bare_key == BareKey::Char('f') && key.has_modifiers(&[KeyModifier::Ctrl]) {
             self.toggle_dialog_layer();
@@ -653,11 +665,11 @@ impl State {
                     }
                 }
                 BareKey::Enter => self.start_jump(),
-                BareKey::Char('/') => {
-                    self.mode = Mode::Query;
-                    self.results.clear();
-                    self.selected = 0;
-                    self.status = "Edit the query and press Enter.".to_owned();
+                BareKey::Char('/') | BareKey::Char('e') => {
+                    self.edit_query();
+                }
+                BareKey::Char('r') => {
+                    self.reset_search();
                 }
                 BareKey::Char('c') => {
                     self.toggle_case();
@@ -805,7 +817,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down n/p: select  Enter: center/select  Ctrl+F: float/dock  c: case  s/Tab: scope  /: edit  Esc: close"
+                    "Up/Down n/p: select  Enter: jump  Ctrl+F: float/dock  / or e: edit  r: reset  Esc: close"
                 );
             }
         }
