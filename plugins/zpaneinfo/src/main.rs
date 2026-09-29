@@ -29,8 +29,16 @@ impl State {
                     ));
                     self.lines.push(format!(
                         "Layout: {}{}",
-                        if info.is_floating { "floating" } else { "tiled" },
-                        if info.is_fullscreen { ", fullscreen" } else { "" }
+                        if info.is_floating {
+                            "floating"
+                        } else {
+                            "tiled"
+                        },
+                        if info.is_fullscreen {
+                            ", fullscreen"
+                        } else {
+                            ""
+                        }
                     ));
                     self.lines.push(format!(
                         "Size: {}x{} content",
@@ -52,7 +60,9 @@ impl State {
                     }
                 }
             }
-            Err(error) => self.lines.push(format!("Could not read focused pane: {}", error)),
+            Err(error) => self
+                .lines
+                .push(format!("Could not read focused pane: {}", error)),
         }
 
         self.visible = true;
