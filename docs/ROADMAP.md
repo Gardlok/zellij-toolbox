@@ -63,10 +63,11 @@ Improve zgrep navigation without changing its cross-pane discovery model or depe
 - correct any remaining offset one line at a time until the selected row is near the vertical center of the pane;
 - switch the client into Zellij Scroll mode after the jump so scrollback state is explicit without launching an external scrollback editor;
 - clear prior native search state, apply zgrep's case setting, install the query only after centering, then advance Zellij's active search selection to the chosen visible occurrence so the selected term gets the native active-match marker without giving native search control of destination selection;
-- expose an in-dialog `Ctrl+F` float/dock toggle using the plugin's own pane id and explicitly refocus dock→float transitions so the floating layer is revealed;
+- expose an in-dialog `Ctrl+F` float/dock toggle using the plugin's own pane id and explicitly refocus both transition directions so the dialog keeps input focus;
 - resize floating zgrep to a centered 80% × 80% window and use compact floating chrome so multiple results remain visible;
 - preserve query/results/selection/case/scope across hide/reopen within the plugin instance, making `Alt+G` a resume operation after a jump;
-- support `n`/Down/`j` and `p`/Up/`k` result-list navigation before the next Enter jump.
+- support `n`/Down/`j` and `p`/Up/`k` result-list navigation before the next Enter jump;
+- expose `/` or `e` for editing the remembered query and `r` for clearing buffered search state and starting over.
 
 Earlier runtime candidates were rejected before merge: one assumed fire-and-forget scroll commands had completed, another let native search choose navigation and therefore failed exact-result selection, and the plugin-owned regex highlight path did not render reliably in Scroll mode.
 
