@@ -60,12 +60,12 @@ Improve zgrep navigation without changing its cross-pane discovery model or depe
 - re-resolve a selected result against current scrollback before jumping;
 - focus the target pane and serialize scroll mutations through Zellij `ActionComplete` events;
 - start from the top, use page scrolling only as a coarse accelerator, then re-read the actual viewport offset;
-- correct any remaining offset one line at a time until the selected row is at the top of the pane;
-- apply a plugin-owned literal highlight only after positioning completes;
+- correct any remaining offset one line at a time until the selected row is near the vertical center of the pane;
 - switch the client into Zellij Scroll mode after the jump so scrollback state is explicit without launching an external scrollback editor;
+- clear prior native search state, apply zgrep's case setting, and install the query only after centering so Zellij's built-in search renderer supplies the highlight without choosing the destination;
 - preserve zgrep's existing case and scope controls.
 
-Two earlier runtime candidates were rejected before merge: the first assumed fire-and-forget scroll commands had completed, and the second relied on native-search navigation that highlighted matches but did not move to the selected result.
+Earlier runtime candidates were rejected before merge: one assumed fire-and-forget scroll commands had completed, another let native search choose navigation and therefore failed exact-result selection, and the plugin-owned regex highlight path did not render reliably in Scroll mode.
 
 ## Follow-up ideas
 
