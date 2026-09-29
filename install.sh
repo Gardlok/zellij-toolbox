@@ -72,44 +72,44 @@ If you use keybinds clear-defaults=true, put it inside that block.
 
 shared_except "locked" {
     bind "Alt a" {
-        MessagePlugin "file:$PLUGIN_DIR/zcopyall.wasm" { name "copy_all" }
+        MessagePlugin "file:$PLUGIN_DIR/zcopyall.wasm" {\n            name "copy_all"\n        }
     }
 
-    bind "Alt b" { FocusLastPane }
-    bind "Alt c" { CopyLastCommandOutput }
+    bind "Alt b" {\n        FocusLastPane;\n    }
+    bind "Alt c" {\n        CopyLastCommandOutput;\n    }
 
     bind "Alt d" {
-        MessagePlugin "file:$PLUGIN_DIR/zdiffpane.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zdiffpane.wasm" {\n            name "open"\n        }
     }
 
     bind "Alt g" {
-        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" {\n            name "open"\n        }
     }
 
     bind "Alt m" {
-        MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" { name "mark" }
+        MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" {\n            name "mark"\n        }
     }
     bind "Alt Shift m" {
-        MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" {\n            name "open"\n        }
     }
 
     bind "Alt v" {
-        MessagePlugin "file:$PLUGIN_DIR/zpaneinfo.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zpaneinfo.wasm" {\n            name "open"\n        }
     }
 
     bind "Alt w" {
-        MessagePlugin "file:$PLUGIN_DIR/zalert.wasm" { name "watch" }
+        MessagePlugin "file:$PLUGIN_DIR/zalert.wasm" {\n            name "watch"\n        }
     }
     bind "Alt Shift w" {
-        MessagePlugin "file:$PLUGIN_DIR/zalert.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zalert.wasm" {\n            name "open"\n        }
     }
 
     bind "Alt Shift b" {
-        MessagePlugin "file:$PLUGIN_DIR/zbroadcast.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zbroadcast.wasm" {\n            name "open"\n        }
     }
 
     bind "Alt Space" {
-        MessagePlugin "file:$PLUGIN_DIR/zcommandpalette.wasm" { name "open" }
+        MessagePlugin "file:$PLUGIN_DIR/zcommandpalette.wasm" {\n            name "open"\n        }
     }
 }
 
