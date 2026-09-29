@@ -112,29 +112,38 @@ impl State {
         self.pending_open = false;
         self.pending_jump = None;
         self.visible = true;
-        self.query.clear();
-        self.results.clear();
-        self.selected = 0;
-        self.mode = Mode::Query;
-        self.case_sensitive = false;
-        self.scope = Scope::All;
 
-        match get_focused_pane_info() {
-            Ok((tab_index, PaneId::Terminal(pane_id))) => {
-                self.origin_tab = Some(tab_index);
-                self.origin_pane = Some(pane_id);
+        if self.query.is_empty() && self.results.is_empty() {
+            self.selected = 0;
+            self.mode = Mode::Query;
+            self.case_sensitive = false;
+            self.scope = Scope::All;
+
+            match get_focused_pane_info() {
+                Ok((tab_index, PaneId::Terminal(pane_id))) => {
+                    self.origin_tab = Some(tab_index);
+                    self.origin_pane = Some(pane_id);
+                }
+                Ok((tab_index, _)) => {
+                    self.origin_tab = Some(tab_index);
+                    self.origin_pane = None;
+                }
+                Err(_) => {
+                    self.origin_tab = None;
+                    self.origin_pane = None;
+                }
             }
-            Ok((tab_index, _)) => {
-                self.origin_tab = Some(tab_index);
-                self.origin_pane = None;
-            }
-            Err(_) => {
-                self.origin_tab = None;
-                self.origin_pane = None;
-            }
+
+            self.status = "Type a search term and press Enter.".to_owned();
+        } else if self.results.is_empty() {
+            self.mode = Mode::Query;
+            self.status = "Resume the query and press Enter.".to_owned();
+        } else {
+            self.mode = Mode::Results;
+            self.selected = self.selected.min(self.results.len().saturating_sub(1));
+            self.status = format!("{} buffered match(es).", self.results.len());
         }
 
-        self.status = "Type a search term and press Enter.".to_owned();
         let should_float = self.floating_preference.unwrap_or(true);
         self.pending_float_resize = should_float;
         show_self(should_float);
@@ -338,15 +347,20 @@ impl State {
     }
 
     fn toggle_dialog_layer(&mut self) {
-        let Some(pane_id) = self.own_pane_id() else {
+        let Some(plugin_id) = self.plugin_id else {
             self.status = "Could not identify the zgrep pane.".to_owned();
             return;
         };
+        let pane_id = PaneId::Plugin(plugin_id);
 
         let target_floating = !self.dialog_is_floating;
         self.floating_preference = Some(target_floating);
         self.pending_float_resize = target_floating;
         toggle_pane_embed_or_eject_for_pane_id(pane_id);
+
+        if target_floating {
+            focus_plugin_pane(plugin_id, true, false);
+        }
     }
 
     fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
@@ -630,10 +644,10 @@ impl State {
                     self.visible = false;
                     hide_self();
                 }
-                BareKey::Up | BareKey::Char('k') => {
+                BareKey::Up | BareKey::Char('k') | BareKey::Char('p') => {
                     self.selected = self.selected.saturating_sub(1);
                 }
-                BareKey::Down | BareKey::Char('j') => {
+                BareKey::Down | BareKey::Char('j') | BareKey::Char('n') => {
                     if !self.results.is_empty() {
                         self.selected = (self.selected + 1).min(self.results.len() - 1);
                     }
@@ -791,7 +805,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down: select  Enter: center/select  Ctrl+F: float/dock  c: case  s/Tab: scope  /: edit  Esc: close"
+                    "Up/Down n/p: select  Enter: center/select  Ctrl+F: float/dock  c: case  s/Tab: scope  /: edit  Esc: close"
                 );
             }
         }
