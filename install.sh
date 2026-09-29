@@ -52,7 +52,7 @@ rustup target add "$WASM_TARGET"
 
 printf '==> Building toolbox plugins\n'
 cd "$ROOT"
-cargo build --release --workspace --target "$WASM_TARGET"
+cargo build --locked --release --workspace --target "$WASM_TARGET"
 
 printf '==> Installing toolbox plugins\n'
 mkdir -p "$PLUGIN_DIR"
