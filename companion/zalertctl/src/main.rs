@@ -152,16 +152,7 @@ fn read_snapshot(path: &Path) -> io::Result<Snapshot> {
                 };
                 snapshot.session_generations.insert(session, generation);
             }
-            [
-                "W",
-                session,
-                pane_id,
-                generation,
-                revision,
-                phase,
-                title,
-                command,
-            ] => {
+            ["W", session, pane_id, generation, revision, phase, title, command] => {
                 let Some(session) = decode(session) else {
                     continue;
                 };
