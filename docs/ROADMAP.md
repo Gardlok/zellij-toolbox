@@ -53,13 +53,22 @@ Qualified and runtime-verified on Midas without adding another service:
 - jump with Zellij's native session/pane switching API rather than invoking the helper for navigation;
 - ignore stale asynchronous refresh responses and stale session generations.
 
+## Current development: zgrep precision and highlighting
+
+Improve zgrep navigation without changing its literal-search semantics or dependency set:
+
+- re-resolve a selected result against current scrollback before jumping;
+- use page scrolling only as a coarse accelerator, then correct against the observed viewport offset one line at a time;
+- position the selected line near the middle of the target pane;
+- apply a Zellij-native `ActionFeedback` regex highlight for the literal query after jumping;
+- allow highlight-on-jump to be toggled from the result list;
+- clear the previous zgrep-owned highlight when starting a new search.
+
 ## Follow-up ideas
 
 ### zgrep
 
-- better exact-line positioning
-- optional match highlighting
-- regex mode
+- regex search mode
 
 ### zmark
 
