@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -37,7 +38,8 @@ struct State {
     watches: BTreeMap<u32, Watch>,
     session_name: String,
     companion_path: String,
-    companion_initialized: bool,
+    companion_generation: u128,
+    companion_revision: u64,
     view: View,
     notice: String,
 }
@@ -54,6 +56,17 @@ impl State {
             .get("HOME")
             .map(|home| format!("{home}/.local/bin/zellij-toolbox-alert"))
             .unwrap_or_else(|| "zellij-toolbox-alert".to_owned());
+
+        self.companion_generation = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        self.companion_revision = 0;
+    }
+
+    fn next_revision(&mut self) -> u64 {
+        self.companion_revision = self.companion_revision.saturating_add(1);
+        self.companion_revision
     }
 
     fn command_is_shell(command: &[String]) -> bool {
@@ -76,8 +89,23 @@ impl State {
         }
     }
 
+    fn companion_touch(&self) {
+        let generation = self.companion_generation.to_string();
+        run_command(
+            &[
+                &self.companion_path,
+                "touch",
+                &self.session_name,
+                &generation,
+            ],
+            BTreeMap::new(),
+        );
+    }
+
     fn companion_publish(&mut self, watch: &Watch) {
         let pane_id = watch.pane_id.to_string();
+        let generation = self.companion_generation.to_string();
+        let revision = self.next_revision().to_string();
         let phase = match watch.phase {
             WatchPhase::WaitingForCommand => "armed",
             WatchPhase::WaitingForFinish => "running",
@@ -86,51 +114,39 @@ impl State {
             WatchPhase::WaitingForCommand => String::new(),
             WatchPhase::WaitingForFinish => Self::command_label(&watch.command),
         };
-        let action = if self.companion_initialized {
-            "upsert"
-        } else {
-            "reset-upsert"
-        };
 
         run_command(
             &[
                 &self.companion_path,
-                action,
+                "upsert",
                 &self.session_name,
                 &pane_id,
+                &generation,
+                &revision,
                 phase,
                 &watch.title,
                 &command,
             ],
             BTreeMap::new(),
         );
-
-        self.companion_initialized = true;
     }
 
-    fn companion_clear(&self, pane_id: u32) {
+    fn companion_clear(&mut self, pane_id: u32) {
         let pane_id = pane_id.to_string();
+        let generation = self.companion_generation.to_string();
+        let revision = self.next_revision().to_string();
+
         run_command(
             &[
                 &self.companion_path,
                 "clear",
                 &self.session_name,
                 &pane_id,
+                &generation,
+                &revision,
             ],
             BTreeMap::new(),
         );
-    }
-
-    fn companion_clear_session(&mut self) {
-        run_command(
-            &[
-                &self.companion_path,
-                "clear-session",
-                &self.session_name,
-            ],
-            BTreeMap::new(),
-        );
-        self.companion_initialized = true;
     }
 
     fn run_pending(&mut self) {
@@ -194,9 +210,6 @@ impl State {
     }
 
     fn open_list(&mut self) {
-        if !self.companion_initialized {
-            self.companion_clear_session();
-        }
         self.view = View::List;
         show_self(true);
     }
@@ -257,7 +270,7 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permissions_granted = true;
                 self.refresh_environment();
-                self.companion_initialized = false;
+                self.companion_touch();
                 self.run_pending();
                 true
             }
