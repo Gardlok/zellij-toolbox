@@ -191,8 +191,14 @@ impl State {
             self.global_request.to_string(),
         );
 
+        let generation = self.companion_generation.to_string();
         run_command(
-            &[&self.companion_path, "list-machine"],
+            &[
+                &self.companion_path,
+                "list-machine",
+                &self.session_name,
+                &generation,
+            ],
             context,
         );
     }
