@@ -62,6 +62,7 @@ Improve zgrep navigation without changing its cross-pane discovery model or depe
 - start from the top, use page scrolling only as a coarse accelerator, then re-read the actual viewport offset;
 - correct any remaining offset one line at a time until the selected row is at the top of the pane;
 - apply a plugin-owned literal highlight only after positioning completes;
+- switch the client into Zellij Scroll mode after the jump so scrollback state is explicit without launching an external scrollback editor;
 - preserve zgrep's existing case and scope controls.
 
 Two earlier runtime candidates were rejected before merge: the first assumed fire-and-forget scroll commands had completed, and the second relied on native-search navigation that highlighted matches but did not move to the selected result.
