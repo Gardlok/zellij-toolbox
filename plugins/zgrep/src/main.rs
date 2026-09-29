@@ -242,8 +242,8 @@ impl State {
 
         let anchor_steps_from_bottom = lines[selected_index..]
             .iter()
-            .filter(|line| line.trim_end() == anchor)
-            .count()
+            .map(|line| line.trim_end().match_indices(&anchor).count())
+            .sum::<usize>()
             .max(1);
 
         Some((anchor, anchor_steps_from_bottom))
