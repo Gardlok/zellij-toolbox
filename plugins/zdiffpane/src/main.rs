@@ -231,13 +231,15 @@ impl State {
                     self.diff_offset = self.diff_offset.saturating_sub(1);
                 }
                 BareKey::Down | BareKey::Char('j') => {
-                    self.diff_offset = (self.diff_offset + 1).min(self.diff.len().saturating_sub(1));
+                    self.diff_offset =
+                        (self.diff_offset + 1).min(self.diff.len().saturating_sub(1));
                 }
                 BareKey::PageUp => {
                     self.diff_offset = self.diff_offset.saturating_sub(20);
                 }
                 BareKey::PageDown => {
-                    self.diff_offset = (self.diff_offset + 20).min(self.diff.len().saturating_sub(1));
+                    self.diff_offset =
+                        (self.diff_offset + 20).min(self.diff.len().saturating_sub(1));
                 }
                 BareKey::Char('c') => {
                     copy_to_clipboard(self.diff.join("\n"));
@@ -330,7 +332,11 @@ impl ZellijPlugin for State {
 
                 for (index, choice) in self.choices[start..end].iter().enumerate() {
                     let absolute_index = start + index;
-                    let marker = if absolute_index == self.selected { ">" } else { " " };
+                    let marker = if absolute_index == self.selected {
+                        ">"
+                    } else {
+                        " "
+                    };
                     println!(
                         "{} T{} P{} {}",
                         marker,
@@ -345,18 +351,8 @@ impl ZellijPlugin for State {
             }
             Step::Diff => {
                 if let (Some(a), Some(b)) = (&self.pane_a, &self.pane_b) {
-                    println!(
-                        "- T{} P{} {}",
-                        a.tab_index + 1,
-                        a.pane_id,
-                        a.title
-                    );
-                    println!(
-                        "+ T{} P{} {}",
-                        b.tab_index + 1,
-                        b.pane_id,
-                        b.title
-                    );
+                    println!("- T{} P{} {}", a.tab_index + 1, a.pane_id, a.title);
+                    println!("+ T{} P{} {}", b.tab_index + 1, b.pane_id, b.title);
                     println!();
                 }
 
