@@ -77,7 +77,13 @@ impl State {
             .viewport
             .get(cursor_row)
             .cloned()
-            .or_else(|| contents.viewport.iter().find(|line| !line.trim().is_empty()).cloned())
+            .or_else(|| {
+                contents
+                    .viewport
+                    .iter()
+                    .find(|line| !line.trim().is_empty())
+                    .cloned()
+            })
             .unwrap_or_default();
 
         let title = pane
@@ -270,7 +276,11 @@ impl ZellijPlugin for State {
 
                     for (index, mark) in self.marks[start..end].iter().enumerate() {
                         let absolute_index = start + index;
-                        let marker = if absolute_index == self.selected { ">" } else { " " };
+                        let marker = if absolute_index == self.selected {
+                            ">"
+                        } else {
+                            " "
+                        };
                         let anchor = mark.anchor.trim();
                         let prefix = format!(
                             "{} {}. T{} P{} {} — ",
