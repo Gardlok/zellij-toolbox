@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="wasm32-wasip1"
+WASM_TARGET="wasm32-wasip1"
 PLUGINS=(
     zcopyall
     zpaneinfo
@@ -16,25 +16,49 @@ PLUGINS=(
 
 cd "$ROOT"
 
+HOST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+[[ -n "$HOST_TARGET" ]] || {
+    printf '%s\n' 'FAIL: could not determine Rust host target' >&2
+    exit 1
+}
+
+PLUGIN_ARGS=()
+for plugin in "${PLUGINS[@]}"; do
+    PLUGIN_ARGS+=(-p "$plugin")
+done
+
 printf '=== zellij-toolbox local qualification ===\n'
 
-printf '\n[1/4] formatting\n'
+printf '\n[1/6] formatting\n'
 cargo fmt --all -- --check
 
-printf '\n[2/4] workspace check\n'
-cargo check --locked --workspace --target "$TARGET"
+printf '\n[2/6] plugin check\n'
+cargo check --locked --target "$WASM_TARGET" "${PLUGIN_ARGS[@]}"
 
-printf '\n[3/4] release build\n'
-cargo build --locked --release --workspace --target "$TARGET"
+printf '\n[3/6] native companion check\n'
+cargo check --locked --target "$HOST_TARGET" -p zalertctl
 
-printf '\n[4/4] artifacts\n'
+printf '\n[4/6] plugin release build\n'
+cargo build --locked --release --target "$WASM_TARGET" "${PLUGIN_ARGS[@]}"
+
+printf '\n[5/6] native companion release build\n'
+cargo build --locked --release --target "$HOST_TARGET" -p zalertctl
+
+printf '\n[6/6] artifacts\n'
 for plugin in "${PLUGINS[@]}"; do
-    wasm="$ROOT/target/$TARGET/release/$plugin.wasm"
+    wasm="$ROOT/target/$WASM_TARGET/release/$plugin.wasm"
     [[ -s "$wasm" ]] || {
         printf 'FAIL: missing %s\n' "$wasm" >&2
         exit 1
     }
     ls -lh "$wasm"
 done
+
+companion="$ROOT/target/$HOST_TARGET/release/zellij-toolbox-alert"
+[[ -x "$companion" ]] || {
+    printf 'FAIL: missing %s\n' "$companion" >&2
+    exit 1
+}
+ls -lh "$companion"
 
 printf '\nZELLIJ TOOLBOX QUALIFICATION PASS\n'
