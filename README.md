@@ -21,6 +21,8 @@ Small Zellij utilities for everyday terminal work.
 
 `zback` and `zcopycmd` use native Zellij 0.45 actions. The rest are small WASM plugins.
 
+`zcopycmd` requires OSC 133 shell integration. Zellij 0.45 understands the protocol, but Bash and Zsh do not emit it by default; Fish does.
+
 ## Requirements
 
 To **run** the installed toolbox:
@@ -64,7 +66,7 @@ Alt+V          zpaneinfo
 Alt+W          toggle zalert
 Alt+Shift+W    list zalerts
 Alt+Shift+B    zbroadcast
-Alt+Space      zcommandpalette
+Alt+;          zcommandpalette
 ```
 
 These are suggested defaults. Change them to fit your setup.
@@ -81,7 +83,7 @@ Marks are session-local. A mark stores the pane, scroll position, and an anchor 
 
 ### zdiffpane
 
-Select two panes. The first version compares up to the most recent 300 retained lines from each pane and lets you copy the diff.
+Select two panes. The first version compares up to the most recent 300 retained lines from each pane and lets you copy the diff. Press `f` inside the plugin to toggle no-UI fullscreen.
 
 ### zbroadcast
 
@@ -91,11 +93,13 @@ Select target panes, type one command, review it, then press Enter again to send
 
 Use Alt+W while a long-running command is active. zalert watches for that pane's foreground command to change and then calls `notify-send`.
 
+A watch is intentionally one-shot: after it fires, it is removed. This avoids repeated notifications as the pane returns to a shell and starts later commands. Very short commands can finish before there is time to arm them.
+
 Desktop notifications can appear while you are working in another Zellij session. Automatically jumping back to the originating session is planned for a later native companion.
 
 ### zcommandpalette
 
-The palette is a common front door for the toolbox. `zback` stays on Alt+B because opening the palette itself changes focus history.
+The palette is a common front door for the toolbox. The suggested key is `Alt+;` because desktop environments commonly reserve `Alt+Space`. `zback` stays on Alt+B because opening the palette itself changes focus history.
 
 ## Development
 
