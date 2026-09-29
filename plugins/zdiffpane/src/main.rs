@@ -220,6 +220,7 @@ impl State {
                     }
                 }
                 BareKey::Enter => self.choose(),
+                BareKey::Char('f') => toggle_focus_no_ui_fullscreen(),
                 _ => {}
             },
             Step::Diff => match key.bare_key {
@@ -253,6 +254,7 @@ impl State {
                     self.diff_offset = 0;
                     self.status = "Choose the first pane.".to_owned();
                 }
+                BareKey::Char('f') => toggle_focus_no_ui_fullscreen(),
                 _ => {}
             },
         }
@@ -273,6 +275,7 @@ impl ZellijPlugin for State {
             PermissionType::ReadApplicationState,
             PermissionType::ReadPaneContents,
             PermissionType::WriteToClipboard,
+            PermissionType::ChangeApplicationState,
         ]);
     }
 
@@ -347,7 +350,7 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!("Up/Down: select   Enter: choose   Esc: close");
+                println!("Up/Down: select   Enter: choose   f: fullscreen   Esc: close");
             }
             Step::Diff => {
                 if let (Some(a), Some(b)) = (&self.pane_a, &self.pane_b) {
@@ -364,7 +367,9 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!("Up/Down/PgUp/PgDn: scroll   c: copy   r: new diff   Esc: close");
+                println!(
+                    "Up/Down/PgUp/PgDn: scroll   c: copy   f: fullscreen   r: new diff   Esc: close"
+                );
             }
         }
     }
