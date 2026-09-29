@@ -398,8 +398,15 @@ impl State {
             let pane_id = pending.pane_id;
             let query = pending.query.clone();
             let case_sensitive = pending.case_sensitive;
-            self.pending_jump = None;
             self.apply_highlight(pane_id, &query, case_sensitive);
+            self.run_jump_action(
+                Action::SwitchToMode {
+                    input_mode: InputMode::Scroll,
+                },
+                request,
+                "scroll-mode",
+            );
+            self.pending_jump = None;
             return;
         }
 
