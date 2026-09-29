@@ -263,14 +263,16 @@ impl ZellijPlugin for State {
                 println!();
 
                 let available = rows.saturating_sub(7).max(1);
-                let start = self
-                    .selected
-                    .saturating_sub(available.saturating_sub(1));
+                let start = self.selected.saturating_sub(available.saturating_sub(1));
                 let end = (start + available).min(self.results.len());
 
                 for (index, result) in self.results[start..end].iter().enumerate() {
                     let absolute_index = start + index;
-                    let marker = if absolute_index == self.selected { ">" } else { " " };
+                    let marker = if absolute_index == self.selected {
+                        ">"
+                    } else {
+                        " "
+                    };
                     let prefix = format!(
                         "{} T{} P{} {}:{} ",
                         marker,
