@@ -686,33 +686,32 @@ impl State {
         self.selected = self.selected.saturating_sub(1);
     }
 
-    fn select_adjacent_result_in_current_pane(&mut self, forward: bool) -> bool {
-        let Some(current) = self.results.get(self.selected) else {
+    fn select_adjacent_result_in_pane(&mut self, pane_id: u32, forward: bool) -> bool {
+        let matching: Vec<usize> = self
+            .results
+            .iter()
+            .enumerate()
+            .filter_map(|(index, result)| (result.pane_id == pane_id).then_some(index))
+            .collect();
+        if matching.is_empty() {
             return false;
+        }
+
+        let next_index = match matching.iter().position(|index| *index == self.selected) {
+            Some(position) if forward => matching[(position + 1) % matching.len()],
+            Some(position) => matching[(position + matching.len() - 1) % matching.len()],
+            None if forward => matching[0],
+            None => *matching.last().unwrap_or(&matching[0]),
         };
-        let pane_id = current.pane_id;
-        let len = self.results.len();
-        if len < 2 {
-            return false;
-        }
-
-        for offset in 1..len {
-            let index = if forward {
-                (self.selected + offset) % len
-            } else {
-                (self.selected + len - (offset % len)) % len
-            };
-            if self.results[index].pane_id == pane_id {
-                self.selected = index;
-                return true;
-            }
-        }
-
-        false
+        self.selected = next_index;
+        true
     }
 
     fn jump_adjacent_result_in_current_pane(&mut self, forward: bool) {
-        if self.select_adjacent_result_in_current_pane(forward) {
+        let Ok((_tab_index, PaneId::Terminal(pane_id))) = get_focused_pane_info() else {
+            return;
+        };
+        if self.select_adjacent_result_in_pane(pane_id, forward) {
             self.start_jump();
         }
     }
