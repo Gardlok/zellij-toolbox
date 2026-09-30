@@ -53,9 +53,9 @@ Qualified and runtime-verified on Midas without adding another service:
 - jump with Zellij's native session/pane switching API rather than invoking the helper for navigation;
 - ignore stale asynchronous refresh responses and stale session generations.
 
-## Current development: zgrep exact destination with recovered native highlighting
+## Qualified zgrep exact destination with native highlighting
 
-Refactor zgrep around a strict ownership boundary while preserving literal cross-pane search:
+Qualified and runtime-verified with a strict ownership boundary while preserving literal cross-pane search:
 
 - zgrep owns query, case sensitivity, scope, result ordering, exact selected occurrence, buffered results, centering, and dialog placement;
 - explicit Input/List modes keep query editing separate from result navigation;
