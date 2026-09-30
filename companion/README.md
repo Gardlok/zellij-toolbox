@@ -1,9 +1,10 @@
 # Native companions
 
-Most Zellij Toolbox features should remain Zellij WASM plugins or native Zellij keybindings.
+Most Zellij Toolbox features remain Zellij WASM plugins or native Zellij keybindings. Native companions are used only where a plugin needs narrowly scoped host-side state or cross-session visibility that the WASM sandbox cannot provide cleanly.
 
-A native companion belongs here only when a feature genuinely needs machine-wide visibility outside one Zellij session.
+Current companions:
 
-The current expected use is zalertd, an optional future helper for zalert so watched jobs can notify and be found across multiple local Zellij sessions.
+- `zellij-toolbox-alert` — maintains cross-session zalert watch state and provides CLI list/jump support.
+- `zellij-toolbox-zmark` — stores durable zmark bookmark metadata under the user's state directory so marks can survive zmark plugin unload/reload without granting the WASM plugin full hard-drive access.
 
-Nothing in this directory is required for the current toolbox.
+Neither companion is a daemon. They are short-lived commands invoked by toolbox plugins or explicitly from the shell.
