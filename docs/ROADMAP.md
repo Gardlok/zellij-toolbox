@@ -63,7 +63,7 @@ Refactor zgrep around a strict ownership boundary while preserving literal cross
 - exact jumps are re-resolved against current scrollback and serialized through `ActionComplete`;
 - selected rows are placed near the vertical center using coarse page movement plus measured one-line correction;
 - native Zellij search is used only after exact positioning to render visible highlights;
-- zgrep clears native search state, applies the requested case mode, installs the query, activates one visible match, then re-measures/re-centers the exact zgrep-selected destination;
+- zgrep clears native search state, installs the query, applies the requested case mode after query installation, activates one visible match, then re-measures/re-centers the exact zgrep-selected destination;
 - Scroll-mode `n/p` navigation is installed session-locally through runtime KDL `reconfigure(..., false)` with `MessagePluginId`, avoiding both manual config edits and the plugin protobuf's lossy `KeybindPipe` serialization;
 - `Ctrl+F` float/dock transitions are serialized, followed by explicit zgrep refocus and floating resize;
 - opening zgrep restores Normal input mode so terminal Scroll/Search modes do not leak into dialog input.
