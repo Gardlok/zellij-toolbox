@@ -10,6 +10,8 @@ use std::time::Duration;
 struct MarkEntry {
     session: String,
     id: u128,
+    revision: u128,
+    deleted: bool,
     pane_id: u32,
     tab_index: usize,
     top_offset: usize,
@@ -31,7 +33,7 @@ impl Drop for StateLock {
 
 fn usage() -> ! {
     eprintln!(
-        "Usage:\n  zellij-toolbox-zmark list [session]\n  zellij-toolbox-zmark list-machine <session>\n  zellij-toolbox-zmark add <session> <id> <pane-id> <tab-index> <top-offset> <cursor-row> <title> <name> <anchor>\n  zellij-toolbox-zmark rename <session> <id> <name>\n  zellij-toolbox-zmark delete <session> <id>"
+        "Usage:\n  zellij-toolbox-zmark list [session]\n  zellij-toolbox-zmark list-machine <session>\n  zellij-toolbox-zmark put <session> <id> <revision> <pane-id> <tab-index> <top-offset> <cursor-row> <title> <name> <anchor>\n  zellij-toolbox-zmark delete <session> <id> <revision>"
     );
     process::exit(2);
 }
@@ -125,7 +127,9 @@ fn decode(value: &str) -> Option<String> {
 fn read_entries(path: &Path) -> io::Result<Vec<MarkEntry>> {
     let mut data = String::new();
     match File::open(path) {
-        Ok(mut file) => file.read_to_string(&mut data)?,
+        Ok(mut file) => {
+            file.read_to_string(&mut data)?;
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     }
@@ -138,6 +142,8 @@ fn read_entries(path: &Path) -> io::Result<Vec<MarkEntry>> {
             "M",
             session,
             id,
+            revision,
+            deleted,
             pane_id,
             tab_index,
             top_offset,
@@ -155,6 +161,14 @@ fn read_entries(path: &Path) -> io::Result<Vec<MarkEntry>> {
         };
         let Ok(id) = id.parse::<u128>() else {
             continue;
+        };
+        let Ok(revision) = revision.parse::<u128>() else {
+            continue;
+        };
+        let deleted = match *deleted {
+            "0" => false,
+            "1" => true,
+            _ => continue,
         };
         let Ok(pane_id) = pane_id.parse::<u32>() else {
             continue;
@@ -181,6 +195,8 @@ fn read_entries(path: &Path) -> io::Result<Vec<MarkEntry>> {
         entries.push(MarkEntry {
             session,
             id,
+            revision,
+            deleted,
             pane_id,
             tab_index,
             top_offset,
@@ -216,9 +232,11 @@ fn write_entries(dir: &Path, path: &Path, entries: &[MarkEntry]) -> io::Result<(
         for entry in ordered {
             writeln!(
                 file,
-                "M\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "M\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 encode(&entry.session),
                 entry.id,
+                entry.revision,
+                if entry.deleted { 1 } else { 0 },
                 entry.pane_id,
                 entry.tab_index,
                 entry.top_offset,
@@ -245,8 +263,16 @@ fn with_locked_entries<T>(
     action(&dir, &state, &mut entries)
 }
 
-fn add(args: &[String]) -> io::Result<()> {
-    if args.len() != 9 {
+fn should_apply(entries: &[MarkEntry], session: &str, id: u128, revision: u128) -> bool {
+    entries
+        .iter()
+        .find(|entry| entry.session == session && entry.id == id)
+        .map(|entry| entry.revision < revision)
+        .unwrap_or(true)
+}
+
+fn put(args: &[String]) -> io::Result<()> {
+    if args.len() != 10 {
         usage();
     }
 
@@ -255,24 +281,32 @@ fn add(args: &[String]) -> io::Result<()> {
         id: args[1]
             .parse::<u128>()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid mark id"))?,
-        pane_id: args[2]
+        revision: args[2]
+            .parse::<u128>()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid revision"))?,
+        deleted: false,
+        pane_id: args[3]
             .parse::<u32>()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid pane id"))?,
-        tab_index: args[3]
+        tab_index: args[4]
             .parse::<usize>()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid tab index"))?,
-        top_offset: args[4]
+        top_offset: args[5]
             .parse::<usize>()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid top offset"))?,
-        cursor_row: args[5]
+        cursor_row: args[6]
             .parse::<usize>()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cursor row"))?,
-        title: args[6].clone(),
-        name: args[7].clone(),
-        anchor: args[8].clone(),
+        title: args[7].clone(),
+        name: args[8].clone(),
+        anchor: args[9].clone(),
     };
 
     with_locked_entries(|dir, state, entries| {
+        if !should_apply(entries, &entry.session, entry.id, entry.revision) {
+            return Ok(());
+        }
+
         entries.retain(|existing| {
             !(existing.session == entry.session && existing.id == entry.id)
         });
@@ -281,42 +315,38 @@ fn add(args: &[String]) -> io::Result<()> {
     })
 }
 
-fn rename(args: &[String]) -> io::Result<()> {
+fn delete(args: &[String]) -> io::Result<()> {
     if args.len() != 3 {
         usage();
     }
 
-    let session = &args[0];
+    let session = args[0].clone();
     let id = args[1]
         .parse::<u128>()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid mark id"))?;
-    let name = &args[2];
-
-    with_locked_entries(|dir, state, entries| {
-        let Some(entry) = entries
-            .iter_mut()
-            .find(|entry| entry.session == *session && entry.id == id)
-        else {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "mark not found"));
-        };
-
-        entry.name = name.clone();
-        write_entries(dir, state, entries)
-    })
-}
-
-fn delete(args: &[String]) -> io::Result<()> {
-    if args.len() != 2 {
-        usage();
-    }
-
-    let session = &args[0];
-    let id = args[1]
+    let revision = args[2]
         .parse::<u128>()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid mark id"))?;
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid revision"))?;
 
     with_locked_entries(|dir, state, entries| {
-        entries.retain(|entry| !(entry.session == *session && entry.id == id));
+        if !should_apply(entries, &session, id, revision) {
+            return Ok(());
+        }
+
+        entries.retain(|entry| !(entry.session == session && entry.id == id));
+        entries.push(MarkEntry {
+            session,
+            id,
+            revision,
+            deleted: true,
+            pane_id: 0,
+            tab_index: 0,
+            top_offset: 0,
+            cursor_row: 0,
+            title: String::new(),
+            name: String::new(),
+            anchor: String::new(),
+        });
         write_entries(dir, state, entries)
     })
 }
@@ -325,7 +355,12 @@ fn list_entries(session: Option<&str>) -> io::Result<Vec<MarkEntry>> {
     with_locked_entries(|_dir, _state, entries| {
         let mut selected: Vec<MarkEntry> = entries
             .iter()
-            .filter(|entry| session.map(|name| entry.session == name).unwrap_or(true))
+            .filter(|entry| {
+                !entry.deleted
+                    && session
+                        .map(|name| entry.session.as_str() == name)
+                        .unwrap_or(true)
+            })
             .cloned()
             .collect();
 
@@ -341,8 +376,9 @@ fn list_entries(session: Option<&str>) -> io::Result<Vec<MarkEntry>> {
 fn print_machine(entries: &[MarkEntry]) {
     for entry in entries {
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             entry.id,
+            entry.revision,
             entry.pane_id,
             entry.tab_index,
             entry.top_offset,
@@ -386,8 +422,7 @@ fn run() -> io::Result<()> {
     let rest: Vec<String> = args.collect();
 
     match command.as_str() {
-        "add" => add(&rest),
-        "rename" => rename(&rest),
+        "put" => put(&rest),
         "delete" => delete(&rest),
         "list-machine" => {
             if rest.len() != 1 {
