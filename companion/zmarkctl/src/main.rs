@@ -138,20 +138,8 @@ fn read_entries(path: &Path) -> io::Result<Vec<MarkEntry>> {
 
     for line in data.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        let [
-            "M",
-            session,
-            id,
-            revision,
-            deleted,
-            pane_id,
-            tab_index,
-            top_offset,
-            cursor_row,
-            title,
-            name,
-            anchor,
-        ] = fields.as_slice()
+        let ["M", session, id, revision, deleted, pane_id, tab_index, top_offset, cursor_row, title, name, anchor] =
+            fields.as_slice()
         else {
             continue;
         };
@@ -307,9 +295,7 @@ fn put(args: &[String]) -> io::Result<()> {
             return Ok(());
         }
 
-        entries.retain(|existing| {
-            !(existing.session == entry.session && existing.id == entry.id)
-        });
+        entries.retain(|existing| !(existing.session == entry.session && existing.id == entry.id));
         entries.push(entry);
         write_entries(dir, state, entries)
     })
