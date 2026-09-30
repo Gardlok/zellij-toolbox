@@ -88,7 +88,9 @@ cat <<EOF
 Installed Zellij Toolbox plugins and zalert companion.
 
 Merge this section into your existing keybinds block.
-If you use keybinds clear-defaults=true, put it inside that block.
+If you use keybinds clear-defaults=true, put these entries inside that block.
+
+zgrep installs its n/p Scroll-mode navigation bindings at runtime for the current Zellij session after permission is granted; no manual scroll-mode bindings are required.
 
 shared_except "locked" {
     bind "Alt a" {
@@ -116,7 +118,6 @@ shared_except "locked" {
             name "open"
         }
     }
-
     bind "Alt m" {
         MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" {
             name "mark"
@@ -165,7 +166,8 @@ Suggested keys:
   Alt+B          previous pane
   Alt+C          last command output
   Alt+D          diff two panes
-  Alt+G          search pane history
+  Alt+G          open/resume zgrep
+  n / p (Scroll) next / previous zgrep match in focused pane (runtime-bound)
   Alt+M          add mark
   Alt+Shift+M    list marks
   Alt+V          pane info

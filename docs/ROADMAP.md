@@ -53,13 +53,30 @@ Qualified and runtime-verified on Midas without adding another service:
 - jump with Zellij's native session/pane switching API rather than invoking the helper for navigation;
 - ignore stale asynchronous refresh responses and stale session generations.
 
+## Qualified zgrep exact destination with native highlighting
+
+Qualified and runtime-verified with a strict ownership boundary while preserving literal cross-pane search:
+
+- zgrep owns query, case sensitivity, scope, result ordering, exact selected occurrence, buffered results, centering, and dialog placement;
+- explicit Input/List modes keep query editing separate from result navigation;
+- buffered results survive hide/reopen and remain valid only while the current query still matches the query that produced them;
+- exact jumps are re-resolved against current scrollback and serialized through `ActionComplete`;
+- selected rows are placed near the vertical center using coarse page movement plus measured one-line correction;
+- native Zellij search is used only after exact positioning to render visible highlights;
+- zgrep clears native search state, installs the query, applies the requested case mode after query installation, activates one visible match, then re-measures/re-centers the exact zgrep-selected destination;
+- Scroll-mode `n/p` navigation is installed session-locally through runtime KDL `reconfigure(..., false)` with `MessagePluginId`, avoiding both manual config edits and the plugin protobuf's lossy `KeybindPipe` serialization;
+- `Ctrl+F` float/dock transitions are serialized, followed by explicit zgrep refocus and floating resize;
+- opening zgrep restores Normal input mode so terminal Scroll/Search modes do not leak into dialog input.
+
+Superseded runtime candidates relied on native search as final destination authority, plugin regex highlighting in retained Scroll-mode history, URL-addressed manual Scroll-mode message bindings, direct `rebind_keys` with `KeybindPipe`, or global next/previous bindings. Those approaches were rejected because they could move to case-equivalent/duplicate matches, failed to render visibly, depended on manual config, lost pipe metadata during protobuf serialization, or conflicted with established controls.
+
 ## Follow-up ideas
 
 ### zgrep
 
-- better exact-line positioning
-- optional match highlighting
-- regex mode
+- evaluate ratatui for a richer picker UI in a separate dependency/lockfile milestone
+- optional fuzzy filtering after literal exact-jump behavior is qualified
+- regex search mode
 
 ### zmark
 
