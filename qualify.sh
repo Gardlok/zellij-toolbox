@@ -36,13 +36,13 @@ printf '\n[2/6] plugin check\n'
 cargo check --locked --target "$WASM_TARGET" "${PLUGIN_ARGS[@]}"
 
 printf '\n[3/6] native companion check\n'
-cargo check --locked --target "$HOST_TARGET" -p zalertctl
+cargo check --locked --target "$HOST_TARGET" -p zalertctl -p zmarkctl
 
 printf '\n[4/6] plugin release build\n'
 cargo build --locked --release --target "$WASM_TARGET" "${PLUGIN_ARGS[@]}"
 
 printf '\n[5/6] native companion release build\n'
-cargo build --locked --release --target "$HOST_TARGET" -p zalertctl
+cargo build --locked --release --target "$HOST_TARGET" -p zalertctl -p zmarkctl
 
 printf '\n[6/6] artifacts\n'
 for plugin in "${PLUGINS[@]}"; do
@@ -54,11 +54,15 @@ for plugin in "${PLUGINS[@]}"; do
     ls -lh "$wasm"
 done
 
-companion="$ROOT/target/$HOST_TARGET/release/zellij-toolbox-alert"
-[[ -x "$companion" ]] || {
-    printf 'FAIL: missing %s\n' "$companion" >&2
-    exit 1
-}
-ls -lh "$companion"
+for companion in \
+    "$ROOT/target/$HOST_TARGET/release/zellij-toolbox-alert" \
+    "$ROOT/target/$HOST_TARGET/release/zellij-toolbox-zmark"
+do
+    [[ -x "$companion" ]] || {
+        printf 'FAIL: missing %s\n' "$companion" >&2
+        exit 1
+    }
+    ls -lh "$companion"
+done
 
 printf '\nZELLIJ TOOLBOX QUALIFICATION PASS\n'

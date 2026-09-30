@@ -2,6 +2,7 @@
 members = [
     "plugins/*",
     "companion/zalertctl",
+    "companion/zmarkctl",
 ]
 resolver = "2"
 

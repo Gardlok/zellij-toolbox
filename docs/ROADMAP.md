@@ -70,6 +70,20 @@ Qualified and runtime-verified with a strict ownership boundary while preserving
 
 Superseded runtime candidates relied on native search as final destination authority, plugin regex highlighting in retained Scroll-mode history, URL-addressed manual Scroll-mode message bindings, direct `rebind_keys` with `KeybindPipe`, or global next/previous bindings. Those approaches were rejected because they could move to case-equivalent/duplicate matches, failed to render visibly, depended on manual config, lost pipe metadata during protobuf serialization, or conflicted with established controls.
 
+## Qualified durable zmark state foundation
+
+Qualified and runtime-verified on Midas while preserving the existing plugin UX:
+
+- keep `Alt+M` add and `Alt+Shift+M` list behavior unchanged;
+- use a short-lived `zellij-toolbox-zmark` helper instead of granting the WASM plugin full hard-drive access;
+- store state atomically under the user's state directory with no daemon and no third-party dependencies;
+- order asynchronous writes with per-mark revisions and delete tombstones so stale writes cannot resurrect older state;
+- restore marks when the zmark plugin is relaunched in the same named Zellij session;
+- persist add, rename, and delete operations across plugin reload;
+- restored marks must re-resolve the saved pane and anchor before jumping;
+- stale restored marks remain visible and deletable but cannot trigger a blind offset jump;
+- keep live-mark offset fallback behavior for the current plugin instance.
+
 ## Follow-up ideas
 
 ### zgrep
@@ -80,8 +94,8 @@ Superseded runtime candidates relied on native search as final destination autho
 
 ### zmark
 
-- optional persistence
 - faster exact restoration for very large offsets
+- optional cross-session import/export after durable same-session behavior is qualified
 
 ### zdiffpane
 

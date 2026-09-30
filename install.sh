@@ -64,8 +64,8 @@ printf '==> Building toolbox plugins\n'
 cd "$ROOT"
 cargo build --locked --release --target "$WASM_TARGET" "${PLUGIN_ARGS[@]}"
 
-printf '==> Building zalert companion\n'
-cargo build --locked --release --target "$HOST_TARGET" -p zalertctl
+printf '==> Building native companions\n'
+cargo build --locked --release --target "$HOST_TARGET" -p zalertctl -p zmarkctl
 
 printf '==> Installing toolbox plugins\n'
 mkdir -p "$PLUGIN_DIR"
@@ -76,16 +76,22 @@ for plugin in "${PLUGINS[@]}"; do
     printf '    %s\n' "$PLUGIN_DIR/$plugin.wasm"
 done
 
-printf '==> Installing zalert companion\n'
+printf '==> Installing native companions\n'
 mkdir -p "$BIN_DIR"
-COMPANION_SRC="$ROOT/target/$HOST_TARGET/release/zellij-toolbox-alert"
-[[ -x "$COMPANION_SRC" ]] || die "missing companion artifact: $COMPANION_SRC"
-install -m 0755 "$COMPANION_SRC" "$BIN_DIR/zellij-toolbox-alert"
+
+ALERT_COMPANION_SRC="$ROOT/target/$HOST_TARGET/release/zellij-toolbox-alert"
+[[ -x "$ALERT_COMPANION_SRC" ]] || die "missing companion artifact: $ALERT_COMPANION_SRC"
+install -m 0755 "$ALERT_COMPANION_SRC" "$BIN_DIR/zellij-toolbox-alert"
 printf '    %s\n' "$BIN_DIR/zellij-toolbox-alert"
+
+ZMARK_COMPANION_SRC="$ROOT/target/$HOST_TARGET/release/zellij-toolbox-zmark"
+[[ -x "$ZMARK_COMPANION_SRC" ]] || die "missing companion artifact: $ZMARK_COMPANION_SRC"
+install -m 0755 "$ZMARK_COMPANION_SRC" "$BIN_DIR/zellij-toolbox-zmark"
+printf '    %s\n' "$BIN_DIR/zellij-toolbox-zmark"
 
 cat <<EOF
 
-Installed Zellij Toolbox plugins and zalert companion.
+Installed Zellij Toolbox plugins and native companions.
 
 Merge this section into your existing keybinds block.
 If you use keybinds clear-defaults=true, put these entries inside that block.
@@ -176,9 +182,12 @@ Suggested keys:
   Alt+Shift+B    broadcast command
   Alt+;          command palette
 
-Cross-session alert companion:
+Native companions:
   $BIN_DIR/zellij-toolbox-alert list
   $BIN_DIR/zellij-toolbox-alert jump N
+  $BIN_DIR/zellij-toolbox-zmark list
+
+zmark uses its companion only for durable bookmark state; no daemon is started.
 
 The installer does not edit config.kdl or shell startup files automatically.
 EOF
