@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zellij_tile::prelude::actions::{Action, SearchOption};
+use zellij_tile::prelude::actions::{Action, SearchDirection, SearchOption};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -23,6 +23,7 @@ struct PendingJump {
     correction_direction: CorrectionDirection,
     query: String,
     case_sensitive: bool,
+    highlight_activated: bool,
     request: u64,
 }
 
@@ -100,6 +101,7 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
+    scroll_bindings_installed: bool,
     dialog_request: u64,
     plugin_id: Option<u32>,
     dialog_is_floating: bool,
@@ -271,6 +273,55 @@ impl State {
             .unwrap_or(result.line_number.min(lines.len() - 1));
 
         Some(selected_index.saturating_sub(result.pane_rows / 2))
+    }
+
+    fn self_pipe_action(&self, name: &str) -> Option<Action> {
+        let plugin_id = self.plugin_id?;
+        Some(Action::KeybindPipe {
+            name: Some(name.to_owned()),
+            payload: None,
+            args: None,
+            plugin: None,
+            plugin_id: Some(plugin_id),
+            configuration: None,
+            launch_new: false,
+            skip_cache: false,
+            floating: None,
+            in_place: None,
+            cwd: None,
+            pane_title: None,
+        })
+    }
+
+    fn install_scroll_navigation_bindings(&mut self) {
+        if self.scroll_bindings_installed {
+            return;
+        }
+
+        let Some(next_action) = self.self_pipe_action("next") else {
+            return;
+        };
+        let Some(previous_action) = self.self_pipe_action("previous") else {
+            return;
+        };
+
+        rebind_keys(
+            vec![],
+            vec![
+                (
+                    InputMode::Scroll,
+                    KeyWithModifier::new(BareKey::Char('n')),
+                    vec![next_action],
+                ),
+                (
+                    InputMode::Scroll,
+                    KeyWithModifier::new(BareKey::Char('p')),
+                    vec![previous_action],
+                ),
+            ],
+            false,
+        );
+        self.scroll_bindings_installed = true;
     }
 
     fn own_pane_id(&self) -> Option<PaneId> {
@@ -448,6 +499,7 @@ impl State {
             correction_direction: CorrectionDirection::None,
             query,
             case_sensitive: self.case_sensitive,
+            highlight_activated: false,
             request,
         });
 
@@ -499,13 +551,17 @@ impl State {
         };
 
         if pending.correction_steps_remaining == 0 {
-            self.run_jump_action(
-                Action::SwitchToMode {
-                    input_mode: InputMode::Scroll,
-                },
-                request,
-                "scroll-mode",
-            );
+            if pending.highlight_activated {
+                self.pending_jump = None;
+            } else {
+                self.run_jump_action(
+                    Action::SwitchToMode {
+                        input_mode: InputMode::Scroll,
+                    },
+                    request,
+                    "scroll-mode",
+                );
+            }
             return;
         }
 
@@ -619,7 +675,19 @@ impl State {
                 );
             }
             "set-search" => {
-                self.pending_jump = None;
+                self.run_jump_action(
+                    Action::Search {
+                        direction: SearchDirection::Down,
+                    },
+                    request,
+                    "activate-highlight",
+                );
+            }
+            "activate-highlight" => {
+                if let Some(pending) = self.pending_jump.as_mut() {
+                    pending.highlight_activated = true;
+                }
+                self.measure_and_begin_correction(request);
             }
             _ => {}
         }
@@ -775,6 +843,7 @@ impl ZellijPlugin for State {
             PermissionType::ReadPaneContents,
             PermissionType::ChangeApplicationState,
             PermissionType::RunActionsAsUser,
+            PermissionType::Reconfigure,
         ]);
     }
 
@@ -782,6 +851,7 @@ impl ZellijPlugin for State {
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permissions_granted = true;
+                self.install_scroll_navigation_bindings();
                 if self.pending_open {
                     self.open();
                     return true;
