@@ -556,6 +556,34 @@ impl State {
         self.status = "Search cleared. Type a new term and press Enter.".to_owned();
     }
 
+    fn select_next_result(&mut self) {
+        if !self.results.is_empty() {
+            self.selected = (self.selected + 1).min(self.results.len() - 1);
+        }
+    }
+
+    fn select_previous_result(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    fn jump_next_buffered_result(&mut self) {
+        if self.results.is_empty() {
+            self.request_open();
+            return;
+        }
+        self.select_next_result();
+        self.start_jump();
+    }
+
+    fn jump_previous_buffered_result(&mut self) {
+        if self.results.is_empty() {
+            self.request_open();
+            return;
+        }
+        self.select_previous_result();
+        self.start_jump();
+    }
+
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
         if key.bare_key == BareKey::Char('f') && key.has_modifiers(&[KeyModifier::Ctrl]) {
             self.toggle_dialog_layer();
@@ -586,12 +614,10 @@ impl State {
                     hide_self();
                 }
                 BareKey::Up | BareKey::Char('k') | BareKey::Char('p') => {
-                    self.selected = self.selected.saturating_sub(1);
+                    self.select_previous_result();
                 }
                 BareKey::Down | BareKey::Char('j') | BareKey::Char('n') => {
-                    if !self.results.is_empty() {
-                        self.selected = (self.selected + 1).min(self.results.len() - 1);
-                    }
+                    self.select_next_result();
                 }
                 BareKey::Enter => self.start_jump(),
                 BareKey::Char('/') | BareKey::Char('e') => {
@@ -665,11 +691,29 @@ impl ZellijPlugin for State {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
-        if pipe_message.name == "open" {
-            self.request_open();
-            return true;
+        match pipe_message.name.as_str() {
+            "open" => {
+                self.request_open();
+                true
+            }
+            "next" => {
+                if self.visible {
+                    self.select_next_result();
+                } else {
+                    self.jump_next_buffered_result();
+                }
+                true
+            }
+            "previous" => {
+                if self.visible {
+                    self.select_previous_result();
+                } else {
+                    self.jump_previous_buffered_result();
+                }
+                true
+            }
+            _ => false,
         }
-        false
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
