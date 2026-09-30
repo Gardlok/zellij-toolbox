@@ -101,6 +101,7 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
+    native_search_case_sensitive: bool,
     scroll_bindings_installed: bool,
     dialog_request: u64,
     plugin_id: Option<u32>,
@@ -625,34 +626,45 @@ impl State {
                 );
             }
             "clear-search" => {
-                let Some(pending) = self.pending_jump.as_ref() else {
+                let Some((case_sensitive, query)) = self
+                    .pending_jump
+                    .as_ref()
+                    .map(|pending| (pending.case_sensitive, pending.query.clone()))
+                else {
                     return false;
                 };
-                if pending.case_sensitive {
-                    self.run_jump_action(
-                        Action::SearchInput {
-                            input: pending.query.clone().into_bytes(),
-                        },
-                        request,
-                        "set-search",
-                    );
-                } else {
+
+                if case_sensitive != self.native_search_case_sensitive {
                     self.run_jump_action(
                         Action::SearchToggleOption {
                             option: SearchOption::CaseSensitivity,
                         },
                         request,
-                        "case-insensitive",
+                        "sync-case",
+                    );
+                } else {
+                    self.run_jump_action(
+                        Action::SearchInput {
+                            input: query.into_bytes(),
+                        },
+                        request,
+                        "set-search",
                     );
                 }
             }
-            "case-insensitive" => {
-                let Some(pending) = self.pending_jump.as_ref() else {
+            "sync-case" => {
+                let Some((case_sensitive, query)) = self
+                    .pending_jump
+                    .as_ref()
+                    .map(|pending| (pending.case_sensitive, pending.query.clone()))
+                else {
                     return false;
                 };
+
+                self.native_search_case_sensitive = case_sensitive;
                 self.run_jump_action(
                     Action::SearchInput {
-                        input: pending.query.clone().into_bytes(),
+                        input: query.into_bytes(),
                     },
                     request,
                     "set-search",
