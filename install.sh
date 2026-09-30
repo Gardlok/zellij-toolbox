@@ -116,6 +116,16 @@ shared_except "locked" {
             name "open"
         }
     }
+    bind "Alt n" {
+        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" {
+            name "next"
+        }
+    }
+    bind "Alt p" {
+        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" {
+            name "previous"
+        }
+    }
 
     bind "Alt m" {
         MessagePlugin "file:$PLUGIN_DIR/zmark.wasm" {
@@ -165,7 +175,9 @@ Suggested keys:
   Alt+B          previous pane
   Alt+C          last command output
   Alt+D          diff two panes
-  Alt+G          search pane history
+  Alt+G          open/resume zgrep results
+  Alt+N          next buffered zgrep result
+  Alt+P          previous buffered zgrep result
   Alt+M          add mark
   Alt+Shift+M    list marks
   Alt+V          pane info
