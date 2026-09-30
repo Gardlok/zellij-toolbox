@@ -41,13 +41,13 @@ impl Default for CorrectionDirection {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
-    Query,
-    Results,
+    Input,
+    List,
 }
 
 impl Default for Mode {
     fn default() -> Self {
-        Self::Query
+        Self::Input
     }
 }
 
@@ -89,6 +89,7 @@ struct State {
     visible: bool,
     pane_manifest: PaneManifest,
     query: String,
+    results_query: String,
     results: Vec<SearchResult>,
     selected: usize,
     mode: Mode,
@@ -99,6 +100,7 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
+    dialog_request: u64,
     plugin_id: Option<u32>,
     dialog_is_floating: bool,
     floating_preference: Option<bool>,
@@ -113,7 +115,7 @@ impl State {
 
         if self.query.is_empty() && self.results.is_empty() {
             self.selected = 0;
-            self.mode = Mode::Query;
+            self.mode = Mode::Input;
             self.case_sensitive = false;
             self.scope = Scope::All;
 
@@ -134,10 +136,10 @@ impl State {
 
             self.status = "Type a search term and press Enter.".to_owned();
         } else if self.results.is_empty() {
-            self.mode = Mode::Query;
+            self.mode = Mode::Input;
             self.status = "Resume the query and press Enter.".to_owned();
         } else {
-            self.mode = Mode::Results;
+            self.mode = Mode::List;
             self.selected = self.selected.min(self.results.len().saturating_sub(1));
             self.status = format!("{} buffered match(es).", self.results.len());
         }
@@ -234,14 +236,18 @@ impl State {
             }
         }
 
-        self.mode = Mode::Results;
-        self.status = if self.results.is_empty() {
-            "No matches. Press / to edit the search.".to_owned()
-        } else if self.results.len() >= MAX_RESULTS {
-            format!("Showing first {} matches.", MAX_RESULTS)
+        self.results_query = needle;
+        if self.results.is_empty() {
+            self.mode = Mode::Input;
+            self.status = "No matches. Edit the query and press Enter.".to_owned();
         } else {
-            format!("{} match(es).", self.results.len())
-        };
+            self.mode = Mode::List;
+            self.status = if self.results.len() >= MAX_RESULTS {
+                format!("Showing first {} matches.", MAX_RESULTS)
+            } else {
+                format!("{} match(es).", self.results.len())
+            };
+        }
     }
 
     fn resolve_target_top(&self, result: &SearchResult) -> Option<usize> {
@@ -305,18 +311,112 @@ impl State {
         }
     }
 
+    fn dialog_context(
+        request: u64,
+        target_floating: bool,
+        stage: &str,
+    ) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("zgrep-op".to_owned(), "dialog".to_owned()),
+            ("zgrep-request".to_owned(), request.to_string()),
+            ("zgrep-target-floating".to_owned(), target_floating.to_string()),
+            ("zgrep-stage".to_owned(), stage.to_owned()),
+        ])
+    }
+
+    fn run_dialog_action(
+        &self,
+        action: Action,
+        request: u64,
+        target_floating: bool,
+        stage: &str,
+    ) {
+        run_action(
+            action,
+            Self::dialog_context(request, target_floating, stage),
+        );
+    }
+
     fn toggle_dialog_layer(&mut self) {
-        let Some(plugin_id) = self.plugin_id else {
+        let Some(_plugin_id) = self.plugin_id else {
             self.status = "Could not identify the zgrep pane.".to_owned();
             return;
         };
-        let pane_id = PaneId::Plugin(plugin_id);
 
         let target_floating = !self.dialog_is_floating;
+        self.dialog_request = self.dialog_request.saturating_add(1);
+        let request = self.dialog_request;
+
         self.floating_preference = Some(target_floating);
-        self.pending_float_resize = target_floating;
-        toggle_pane_embed_or_eject_for_pane_id(pane_id);
-        focus_plugin_pane(plugin_id, target_floating, false);
+        self.pending_float_resize = false;
+        self.run_dialog_action(
+            Action::TogglePaneEmbedOrFloating,
+            request,
+            target_floating,
+            "toggle",
+        );
+    }
+
+    fn handle_dialog_action_complete(&mut self, context: BTreeMap<String, String>) -> bool {
+        if context.get("zgrep-op").map(String::as_str) != Some("dialog") {
+            return false;
+        }
+
+        let Some(request) = context
+            .get("zgrep-request")
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+        if request != self.dialog_request {
+            return false;
+        }
+
+        let target_floating = context
+            .get("zgrep-target-floating")
+            .map(String::as_str)
+            == Some("true");
+        let Some(stage) = context.get("zgrep-stage").map(String::as_str) else {
+            return false;
+        };
+        let Some(plugin_id) = self.plugin_id else {
+            return false;
+        };
+
+        match stage {
+            "toggle" => {
+                self.run_dialog_action(
+                    Action::FocusPluginPaneWithId {
+                        pane_id: plugin_id,
+                        should_float_if_hidden: target_floating,
+                        should_be_in_place_if_hidden: false,
+                    },
+                    request,
+                    target_floating,
+                    "focus",
+                );
+            }
+            "focus" if target_floating => {
+                let coordinates = FloatingPaneCoordinates::default()
+                    .with_x_percent(10)
+                    .with_y_percent(10)
+                    .with_width_percent(80)
+                    .with_height_percent(80);
+                self.run_dialog_action(
+                    Action::ChangeFloatingPaneCoordinates {
+                        pane_id: PaneId::Plugin(plugin_id),
+                        coordinates,
+                    },
+                    request,
+                    target_floating,
+                    "resize",
+                );
+            }
+            "focus" | "resize" => {}
+            _ => {}
+        }
+
+        self.visible
     }
 
     fn jump_context(request: u64, stage: &str) -> BTreeMap<String, String> {
@@ -542,17 +642,16 @@ impl State {
     }
 
     fn edit_query(&mut self) {
-        self.mode = Mode::Query;
-        self.results.clear();
-        self.selected = 0;
-        self.status = "Edit the query and press Enter.".to_owned();
+        self.mode = Mode::Input;
+        self.status = "Edit the query and press Enter to refresh results.".to_owned();
     }
 
     fn reset_search(&mut self) {
         self.query.clear();
         self.results.clear();
+        self.results_query.clear();
         self.selected = 0;
-        self.mode = Mode::Query;
+        self.mode = Mode::Input;
         self.status = "Search cleared. Type a new term and press Enter.".to_owned();
     }
 
@@ -566,24 +665,6 @@ impl State {
         self.selected = self.selected.saturating_sub(1);
     }
 
-    fn jump_next_buffered_result(&mut self) {
-        if self.results.is_empty() {
-            self.request_open();
-            return;
-        }
-        self.select_next_result();
-        self.start_jump();
-    }
-
-    fn jump_previous_buffered_result(&mut self) {
-        if self.results.is_empty() {
-            self.request_open();
-            return;
-        }
-        self.select_previous_result();
-        self.start_jump();
-    }
-
     fn handle_key(&mut self, key: KeyWithModifier) -> bool {
         if key.bare_key == BareKey::Char('f') && key.has_modifiers(&[KeyModifier::Ctrl]) {
             self.toggle_dialog_layer();
@@ -595,20 +676,27 @@ impl State {
         }
 
         match self.mode {
-            Mode::Query => match key.bare_key {
+            Mode::Input => match key.bare_key {
                 BareKey::Esc => {
                     self.visible = false;
                     hide_self();
                 }
                 BareKey::Enter => self.search(),
-                BareKey::Tab => self.cycle_scope(),
+                BareKey::Tab => {
+                    if !self.results.is_empty() && self.query.trim() == self.results_query {
+                        self.mode = Mode::List;
+                        self.status = format!("{} buffered match(es).", self.results.len());
+                    } else {
+                        self.status = "Press Enter to search the edited query.".to_owned();
+                    }
+                }
                 BareKey::Backspace => {
                     self.query.pop();
                 }
                 BareKey::Char(c) => self.query.push(c),
                 _ => {}
             },
-            Mode::Results => match key.bare_key {
+            Mode::List => match key.bare_key {
                 BareKey::Esc => {
                     self.visible = false;
                     hide_self();
@@ -620,7 +708,7 @@ impl State {
                     self.select_next_result();
                 }
                 BareKey::Enter => self.start_jump(),
-                BareKey::Char('/') | BareKey::Char('e') => {
+                BareKey::Tab | BareKey::Char('/') | BareKey::Char('e') => {
                     self.edit_query();
                 }
                 BareKey::Char('r') => {
@@ -630,7 +718,7 @@ impl State {
                     self.toggle_case();
                     self.search();
                 }
-                BareKey::Char('s') | BareKey::Tab => {
+                BareKey::Char('s') => {
                     self.cycle_scope();
                     self.search();
                 }
@@ -683,7 +771,11 @@ impl ZellijPlugin for State {
                 self.visible
             }
             Event::ActionComplete(_action, _pane_id, context) => {
-                self.handle_jump_action_complete(context)
+                if context.get("zgrep-op").map(String::as_str) == Some("dialog") {
+                    self.handle_dialog_action_complete(context)
+                } else {
+                    self.handle_jump_action_complete(context)
+                }
             }
             Event::Key(key) if self.visible => self.handle_key(key),
             _ => false,
@@ -691,29 +783,11 @@ impl ZellijPlugin for State {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
-        match pipe_message.name.as_str() {
-            "open" => {
-                self.request_open();
-                true
-            }
-            "next" => {
-                if self.visible {
-                    self.select_next_result();
-                } else {
-                    self.jump_next_buffered_result();
-                }
-                true
-            }
-            "previous" => {
-                if self.visible {
-                    self.select_previous_result();
-                } else {
-                    self.jump_previous_buffered_result();
-                }
-                true
-            }
-            _ => false,
+        if pipe_message.name == "open" {
+            self.request_open();
+            return true;
         }
+        false
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
@@ -727,15 +801,20 @@ impl ZellijPlugin for State {
         };
 
         match self.mode {
-            Mode::Query => {
+            Mode::Input => {
+                println!("Input");
+                println!();
                 println!("Search: {}", self.query);
                 println!("Scope: {}   Case: {}", self.scope.label(), case);
                 println!();
                 println!("{}", self.status);
                 println!();
-                println!("Tab: scope   Ctrl+F: float/dock   Enter: search   Esc: close");
+                println!("Enter: search   Tab: buffered list   Ctrl+F: float/dock   Esc: close");
             }
-            Mode::Results => {
+            Mode::List => {
+                println!("List");
+                println!();
+
                 let view = if self.dialog_is_floating {
                     "floating"
                 } else {
@@ -790,7 +869,7 @@ impl ZellijPlugin for State {
 
                 println!();
                 println!(
-                    "Up/Down n/p: select  Enter: jump  Ctrl+F: float/dock  / or e: edit  r: reset  Esc: close"
+                    "Up/Down n/p: select  Enter: jump  Tab/e: input  c: case  s: scope  r: reset  Ctrl+F: float/dock  Esc: close"
                 );
             }
         }
