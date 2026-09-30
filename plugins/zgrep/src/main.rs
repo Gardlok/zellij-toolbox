@@ -275,52 +275,36 @@ impl State {
         Some(selected_index.saturating_sub(result.pane_rows / 2))
     }
 
-    fn self_pipe_action(&self, name: &str) -> Option<Action> {
-        let plugin_id = self.plugin_id?;
-        Some(Action::KeybindPipe {
-            name: Some(name.to_owned()),
-            payload: None,
-            args: None,
-            plugin: None,
-            plugin_id: Some(plugin_id),
-            configuration: None,
-            launch_new: false,
-            skip_cache: false,
-            floating: None,
-            in_place: None,
-            cwd: None,
-            pane_title: None,
-        })
-    }
-
     fn install_scroll_navigation_bindings(&mut self) {
         if self.scroll_bindings_installed {
             return;
         }
 
-        let Some(next_action) = self.self_pipe_action("next") else {
-            return;
-        };
-        let Some(previous_action) = self.self_pipe_action("previous") else {
+        let Some(plugin_id) = self.plugin_id else {
             return;
         };
 
-        rebind_keys(
-            vec![],
-            vec![
-                (
-                    InputMode::Scroll,
-                    KeyWithModifier::new(BareKey::Char('n')),
-                    vec![next_action],
-                ),
-                (
-                    InputMode::Scroll,
-                    KeyWithModifier::new(BareKey::Char('p')),
-                    vec![previous_action],
-                ),
-            ],
-            false,
+        let configuration = format!(
+            r#"
+            keybinds {{
+                scroll {{
+                    bind "n" {{
+                        MessagePluginId {} {{
+                            name "next"
+                        }}
+                    }}
+                    bind "p" {{
+                        MessagePluginId {} {{
+                            name "previous"
+                        }}
+                    }}
+                }}
+            }}
+            "#,
+            plugin_id, plugin_id
         );
+
+        reconfigure(configuration, false);
         self.scroll_bindings_installed = true;
     }
 
