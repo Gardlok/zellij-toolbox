@@ -18,7 +18,6 @@ struct SearchResult {
 struct PendingJump {
     pane_id: u32,
     target_top: usize,
-    pane_rows: usize,
     page_steps_remaining: usize,
     correction_steps_remaining: usize,
     correction_direction: CorrectionDirection,
@@ -444,7 +443,6 @@ impl State {
         self.pending_jump = Some(PendingJump {
             pane_id: result.pane_id,
             target_top,
-            pane_rows: result.pane_rows,
             page_steps_remaining: target_top / result.pane_rows,
             correction_steps_remaining: 0,
             correction_direction: CorrectionDirection::None,
