@@ -652,6 +652,8 @@ impl State {
         self.results_query.clear();
         self.selected = 0;
         self.mode = Mode::Input;
+        self.case_sensitive = false;
+        self.scope = Scope::All;
         self.status = "Search cleared. Type a new term and press Enter.".to_owned();
     }
 
