@@ -319,18 +319,15 @@ impl State {
         BTreeMap::from([
             ("zgrep-op".to_owned(), "dialog".to_owned()),
             ("zgrep-request".to_owned(), request.to_string()),
-            ("zgrep-target-floating".to_owned(), target_floating.to_string()),
+            (
+                "zgrep-target-floating".to_owned(),
+                target_floating.to_string(),
+            ),
             ("zgrep-stage".to_owned(), stage.to_owned()),
         ])
     }
 
-    fn run_dialog_action(
-        &self,
-        action: Action,
-        request: u64,
-        target_floating: bool,
-        stage: &str,
-    ) {
+    fn run_dialog_action(&self, action: Action, request: u64, target_floating: bool, stage: &str) {
         run_action(
             action,
             Self::dialog_context(request, target_floating, stage),
@@ -372,10 +369,8 @@ impl State {
             return false;
         }
 
-        let target_floating = context
-            .get("zgrep-target-floating")
-            .map(String::as_str)
-            == Some("true");
+        let target_floating =
+            context.get("zgrep-target-floating").map(String::as_str) == Some("true");
         let Some(stage) = context.get("zgrep-stage").map(String::as_str) else {
             return false;
         };
