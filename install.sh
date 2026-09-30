@@ -88,7 +88,21 @@ cat <<EOF
 Installed Zellij Toolbox plugins and zalert companion.
 
 Merge this section into your existing keybinds block.
-If you use keybinds clear-defaults=true, put it inside that block.
+If you already have a scroll { ... } block, merge the n/p bindings into it rather than duplicating that mode block.
+If you use keybinds clear-defaults=true, put these entries inside that block.
+
+scroll {
+    bind "n" {
+        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" {
+            name "next"
+        }
+    }
+    bind "p" {
+        MessagePlugin "file:$PLUGIN_DIR/zgrep.wasm" {
+            name "previous"
+        }
+    }
+}
 
 shared_except "locked" {
     bind "Alt a" {
@@ -165,6 +179,7 @@ Suggested keys:
   Alt+C          last command output
   Alt+D          diff two panes
   Alt+G          open/resume zgrep
+  n / p (Scroll) next / previous zgrep match in focused pane
   Alt+M          add mark
   Alt+Shift+M    list marks
   Alt+V          pane info
