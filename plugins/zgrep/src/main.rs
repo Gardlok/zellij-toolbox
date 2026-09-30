@@ -44,6 +44,7 @@ impl Default for CorrectionDirection {
 enum Mode {
     Input,
     List,
+    Filter,
 }
 
 impl Default for Mode {
@@ -92,7 +93,9 @@ struct State {
     query: String,
     results_query: String,
     results: Vec<SearchResult>,
+    filtered_results: Vec<usize>,
     selected: usize,
+    filter: String,
     mode: Mode,
     status: String,
     case_sensitive: bool,
@@ -117,6 +120,8 @@ impl State {
 
         if self.query.is_empty() && self.results.is_empty() {
             self.selected = 0;
+            self.filter.clear();
+            self.filtered_results.clear();
             self.mode = Mode::Input;
             self.case_sensitive = false;
             self.scope = Scope::All;
@@ -142,8 +147,8 @@ impl State {
             self.status = "Resume the query and press Enter.".to_owned();
         } else {
             self.mode = Mode::List;
-            self.selected = self.selected.min(self.results.len().saturating_sub(1));
-            self.status = format!("{} buffered match(es).", self.results.len());
+            self.rebuild_filtered_results();
+            self.update_picker_status();
         }
 
         let should_float = self.floating_preference.unwrap_or(true);
@@ -175,10 +180,121 @@ impl State {
         }
     }
 
+    fn fuzzy_score(candidate: &str, pattern: &str) -> Option<i64> {
+        if pattern.is_empty() {
+            return Some(0);
+        }
+
+        let candidate = candidate.to_ascii_lowercase();
+        let pattern = pattern.to_ascii_lowercase();
+        let candidate_chars: Vec<char> = candidate.chars().collect();
+        let pattern_chars: Vec<char> = pattern.chars().collect();
+
+        let mut score = 0i64;
+        let mut search_from = 0usize;
+        let mut previous_match: Option<usize> = None;
+
+        for needle in pattern_chars {
+            let relative = candidate_chars[search_from..]
+                .iter()
+                .position(|candidate| *candidate == needle)?;
+            let index = search_from + relative;
+
+            score += 20;
+            if index == 0 {
+                score += 20;
+            }
+            if index > 0 {
+                let previous = candidate_chars[index - 1];
+                if previous.is_whitespace() || matches!(previous, '-' | '_' | '/' | ':' | '.') {
+                    score += 12;
+                }
+            }
+
+            if let Some(previous) = previous_match {
+                let gap = index.saturating_sub(previous + 1);
+                if gap == 0 {
+                    score += 18;
+                } else {
+                    score -= gap.min(12) as i64;
+                }
+            } else {
+                score -= index.min(20) as i64;
+            }
+
+            previous_match = Some(index);
+            search_from = index + 1;
+        }
+
+        Some(score)
+    }
+
+    fn result_filter_haystack(result: &SearchResult) -> String {
+        format!(
+            "T{} P{} {} {}",
+            result.tab_index + 1,
+            result.pane_id,
+            result.title,
+            result.text
+        )
+    }
+
+    fn rebuild_filtered_results(&mut self) {
+        if self.filter.is_empty() {
+            self.filtered_results = (0..self.results.len()).collect();
+        } else {
+            let mut scored: Vec<(i64, usize)> = self
+                .results
+                .iter()
+                .enumerate()
+                .filter_map(|(index, result)| {
+                    Self::fuzzy_score(&Self::result_filter_haystack(result), &self.filter)
+                        .map(|score| (score, index))
+                })
+                .collect();
+
+            scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+            self.filtered_results = scored.into_iter().map(|(_, index)| index).collect();
+        }
+
+        if !self.filtered_results.contains(&self.selected) {
+            self.selected = self.filtered_results.first().copied().unwrap_or(0);
+        }
+    }
+
+    fn update_picker_status(&mut self) {
+        if self.filter.is_empty() {
+            self.status = if self.results.len() >= 200 {
+                "Showing first 200 matches.".to_owned()
+            } else {
+                format!("{} match(es).", self.results.len())
+            };
+        } else {
+            self.status = format!(
+                "{} of {} buffered match(es) pass fuzzy filter.",
+                self.filtered_results.len(),
+                self.results.len()
+            );
+        }
+    }
+
+    fn begin_filter(&mut self) {
+        self.mode = Mode::Filter;
+        self.rebuild_filtered_results();
+        self.update_picker_status();
+    }
+
+    fn clear_filter(&mut self) {
+        self.filter.clear();
+        self.rebuild_filtered_results();
+        self.update_picker_status();
+    }
+
     fn search(&mut self) {
         let needle = self.query.trim().to_owned();
         let folded_needle = needle.to_ascii_lowercase();
         self.results.clear();
+        self.filtered_results.clear();
         self.selected = 0;
 
         if needle.is_empty() {
@@ -240,15 +356,13 @@ impl State {
 
         self.results_query = needle;
         if self.results.is_empty() {
+            self.filtered_results.clear();
             self.mode = Mode::Input;
             self.status = "No matches. Edit the query and press Enter.".to_owned();
         } else {
+            self.rebuild_filtered_results();
             self.mode = Mode::List;
-            self.status = if self.results.len() >= MAX_RESULTS {
-                format!("Showing first {} matches.", MAX_RESULTS)
-            } else {
-                format!("{} match(es).", self.results.len())
-            };
+            self.update_picker_status();
         }
     }
 
@@ -699,6 +813,8 @@ impl State {
     }
 
     fn edit_query(&mut self) {
+        self.filter.clear();
+        self.filtered_results.clear();
         self.mode = Mode::Input;
         self.status = "Edit the query and press Enter to refresh results.".to_owned();
     }
@@ -706,7 +822,9 @@ impl State {
     fn reset_search(&mut self) {
         self.query.clear();
         self.results.clear();
+        self.filtered_results.clear();
         self.results_query.clear();
+        self.filter.clear();
         self.selected = 0;
         self.mode = Mode::Input;
         self.case_sensitive = false;
@@ -715,13 +833,39 @@ impl State {
     }
 
     fn select_next_result(&mut self) {
-        if !self.results.is_empty() {
-            self.selected = (self.selected + 1).min(self.results.len() - 1);
+        if self.filtered_results.is_empty() {
+            return;
         }
+
+        let position = self
+            .filtered_results
+            .iter()
+            .position(|index| *index == self.selected)
+            .unwrap_or(0);
+        let next = (position + 1).min(self.filtered_results.len() - 1);
+        self.selected = self.filtered_results[next];
     }
 
     fn select_previous_result(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        if self.filtered_results.is_empty() {
+            return;
+        }
+
+        let position = self
+            .filtered_results
+            .iter()
+            .position(|index| *index == self.selected)
+            .unwrap_or(0);
+        let previous = position.saturating_sub(1);
+        self.selected = self.filtered_results[previous];
+    }
+
+    fn start_picker_jump(&mut self) {
+        if self.filtered_results.contains(&self.selected) {
+            self.start_jump();
+        } else {
+            self.status = "No filtered result selected.".to_owned();
+        }
     }
 
     fn select_adjacent_result_in_pane(&mut self, pane_id: u32, forward: bool) -> bool {
@@ -776,7 +920,8 @@ impl State {
                 BareKey::Tab => {
                     if !self.results.is_empty() && self.query.trim() == self.results_query {
                         self.mode = Mode::List;
-                        self.status = format!("{} buffered match(es).", self.results.len());
+                        self.rebuild_filtered_results();
+                        self.update_picker_status();
                     } else {
                         self.status = "Press Enter to search the edited query.".to_owned();
                     }
@@ -798,10 +943,11 @@ impl State {
                 BareKey::Down | BareKey::Char('j') | BareKey::Char('n') => {
                     self.select_next_result();
                 }
-                BareKey::Enter => self.start_jump(),
+                BareKey::Enter => self.start_picker_jump(),
                 BareKey::Tab | BareKey::Char('/') | BareKey::Char('e') => {
                     self.edit_query();
                 }
+                BareKey::Char('f') => self.begin_filter(),
                 BareKey::Char('r') => {
                     self.reset_search();
                 }
@@ -812,6 +958,30 @@ impl State {
                 BareKey::Char('s') => {
                     self.cycle_scope();
                     self.search();
+                }
+                _ => {}
+            },
+            Mode::Filter => match key.bare_key {
+                BareKey::Esc => {
+                    self.clear_filter();
+                    self.mode = Mode::List;
+                }
+                BareKey::Enter => self.start_picker_jump(),
+                BareKey::Tab => {
+                    self.mode = Mode::List;
+                    self.update_picker_status();
+                }
+                BareKey::Up => self.select_previous_result(),
+                BareKey::Down => self.select_next_result(),
+                BareKey::Backspace => {
+                    self.filter.pop();
+                    self.rebuild_filtered_results();
+                    self.update_picker_status();
+                }
+                BareKey::Char(c) => {
+                    self.filter.push(c);
+                    self.rebuild_filtered_results();
+                    self.update_picker_status();
                 }
                 _ => {}
             },
@@ -914,8 +1084,9 @@ impl ZellijPlugin for State {
                 println!();
                 println!("Enter: search   Tab: buffered list   Ctrl+F: float/dock   Esc: close");
             }
-            Mode::List => {
-                println!("List");
+            Mode::List | Mode::Filter => {
+                let filtering = self.mode == Mode::Filter;
+                println!("{}", if filtering { "Filter" } else { "List" });
                 println!();
 
                 let view = if self.dialog_is_floating {
@@ -932,6 +1103,14 @@ impl ZellijPlugin for State {
                         case,
                         view
                     );
+                    println!(
+                        "Filter: {}",
+                        if self.filter.is_empty() {
+                            "(none)"
+                        } else {
+                            &self.filter
+                        }
+                    );
                     println!("{}", self.status);
                 } else {
                     println!("Search: {}", self.query);
@@ -941,18 +1120,31 @@ impl ZellijPlugin for State {
                         case,
                         view
                     );
+                    println!(
+                        "Filter: {}",
+                        if self.filter.is_empty() {
+                            "(none)"
+                        } else {
+                            &self.filter
+                        }
+                    );
                     println!("{}", self.status);
                     println!();
                 }
 
-                let reserved_rows = if self.dialog_is_floating { 6 } else { 8 };
+                let reserved_rows = if self.dialog_is_floating { 7 } else { 9 };
                 let available = rows.saturating_sub(reserved_rows).max(1);
-                let start = self.selected.saturating_sub(available.saturating_sub(1));
-                let end = (start + available).min(self.results.len());
+                let selected_position = self
+                    .filtered_results
+                    .iter()
+                    .position(|index| *index == self.selected)
+                    .unwrap_or(0);
+                let start = selected_position.saturating_sub(available.saturating_sub(1));
+                let end = (start + available).min(self.filtered_results.len());
 
-                for (index, result) in self.results[start..end].iter().enumerate() {
-                    let absolute_index = start + index;
-                    let marker = if absolute_index == self.selected {
+                for result_index in &self.filtered_results[start..end] {
+                    let result = &self.results[*result_index];
+                    let marker = if *result_index == self.selected {
                         ">"
                     } else {
                         " "
@@ -971,9 +1163,15 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!(
-                    "Up/Down n/p: select  Enter: jump  Tab/e: input  c: case  s: scope  r: reset  Ctrl+F: float/dock  Esc: close"
-                );
+                if filtering {
+                    println!(
+                        "Type: fuzzy filter  Up/Down: select  Enter: jump  Tab: keep filter  Esc: clear filter"
+                    );
+                } else {
+                    println!(
+                        "Up/Down n/p: select  Enter: jump  f: filter  Tab/e: input  c: case  s: scope  r: reset  Ctrl+F: float/dock  Esc: close"
+                    );
+                }
             }
         }
     }
