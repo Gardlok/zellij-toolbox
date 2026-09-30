@@ -7,6 +7,7 @@ register_plugin!(State);
 #[derive(Clone)]
 struct Mark {
     id: u128,
+    revision: u128,
     pane_id: u32,
     tab_index: usize,
     title: String,
@@ -90,6 +91,14 @@ impl State {
         id
     }
 
+    fn next_revision(current: u128) -> u128 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(1);
+        now.max(current.saturating_add(1))
+    }
+
     fn request_load(&mut self) {
         self.load_request = self.load_request.saturating_add(1);
 
@@ -143,37 +152,41 @@ impl State {
 
         for line in output.lines() {
             let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() != 8 {
+            if fields.len() != 9 {
                 continue;
             }
 
             let Ok(id) = fields[0].parse::<u128>() else {
                 continue;
             };
-            let Ok(pane_id) = fields[1].parse::<u32>() else {
+            let Ok(revision) = fields[1].parse::<u128>() else {
                 continue;
             };
-            let Ok(tab_index) = fields[2].parse::<usize>() else {
+            let Ok(pane_id) = fields[2].parse::<u32>() else {
                 continue;
             };
-            let Ok(top_offset) = fields[3].parse::<usize>() else {
+            let Ok(tab_index) = fields[3].parse::<usize>() else {
                 continue;
             };
-            let Ok(cursor_row) = fields[4].parse::<usize>() else {
+            let Ok(top_offset) = fields[4].parse::<usize>() else {
                 continue;
             };
-            let Some(title) = Self::decode_hex(fields[5]) else {
+            let Ok(cursor_row) = fields[5].parse::<usize>() else {
                 continue;
             };
-            let Some(name) = Self::decode_hex(fields[6]) else {
+            let Some(title) = Self::decode_hex(fields[6]) else {
                 continue;
             };
-            let Some(anchor) = Self::decode_hex(fields[7]) else {
+            let Some(name) = Self::decode_hex(fields[7]) else {
+                continue;
+            };
+            let Some(anchor) = Self::decode_hex(fields[8]) else {
                 continue;
             };
 
             marks.push(Mark {
                 id,
+                revision,
                 pane_id,
                 tab_index,
                 title,
@@ -196,8 +209,9 @@ impl State {
         BTreeMap::from([("zmark-op".to_owned(), "persist".to_owned())])
     }
 
-    fn persist_add(&self, mark: &Mark) {
+    fn persist_put(&self, mark: &Mark) {
         let id = mark.id.to_string();
+        let revision = mark.revision.to_string();
         let pane_id = mark.pane_id.to_string();
         let tab_index = mark.tab_index.to_string();
         let top_offset = mark.top_offset.to_string();
@@ -207,9 +221,10 @@ impl State {
         run_command(
             &[
                 &self.companion_path,
-                "add",
+                "put",
                 &self.session_name,
                 &id,
+                &revision,
                 &pane_id,
                 &tab_index,
                 &top_offset,
@@ -222,28 +237,16 @@ impl State {
         );
     }
 
-    fn persist_rename(&self, id: u128, name: &str) {
+    fn persist_delete(&self, id: u128, revision: u128) {
         let id = id.to_string();
-        run_command(
-            &[
-                &self.companion_path,
-                "rename",
-                &self.session_name,
-                &id,
-                name,
-            ],
-            Self::persistence_context(),
-        );
-    }
-
-    fn persist_delete(&self, id: u128) {
-        let id = id.to_string();
+        let revision = revision.to_string();
         run_command(
             &[
                 &self.companion_path,
                 "delete",
                 &self.session_name,
                 &id,
+                &revision,
             ],
             Self::persistence_context(),
         );
@@ -332,8 +335,10 @@ impl State {
             .map(|pane| pane.title.clone())
             .unwrap_or_else(|| format!("pane {}", pane_id));
 
+        let id = self.next_mark_id();
         let mark = Mark {
-            id: self.next_mark_id(),
+            id,
+            revision: id,
             pane_id,
             tab_index,
             title,
@@ -344,7 +349,7 @@ impl State {
             restored: false,
         };
 
-        self.persist_add(&mark);
+        self.persist_put(&mark);
         self.marks.push(mark);
         self.selected = self.marks.len().saturating_sub(1);
         self.show_notice(format!(
@@ -376,15 +381,16 @@ impl State {
             mark.name = if name.is_empty() {
                 None
             } else {
-                Some(name.clone())
+                Some(name)
             };
-            Some((mark.id, name))
+            mark.revision = Self::next_revision(mark.revision);
+            Some(mark.clone())
         } else {
             None
         };
 
-        if let Some((id, name)) = persisted {
-            self.persist_rename(id, &name);
+        if let Some(mark) = persisted {
+            self.persist_put(&mark);
         }
 
         self.rename_buffer.clear();
@@ -482,7 +488,8 @@ impl State {
                 BareKey::Char('d') => {
                     if !self.marks.is_empty() {
                         let removed = self.marks.remove(self.selected);
-                        self.persist_delete(removed.id);
+                        let revision = Self::next_revision(removed.revision);
+                        self.persist_delete(removed.id, revision);
                         self.selected = self.selected.min(self.marks.len().saturating_sub(1));
                     }
                 }
