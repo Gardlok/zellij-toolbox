@@ -24,7 +24,6 @@ struct PendingJump {
     correction_direction: CorrectionDirection,
     query: String,
     case_sensitive: bool,
-    search_installed: bool,
     request: u64,
 }
 
@@ -102,10 +101,6 @@ struct State {
     origin_pane: Option<u32>,
     jump_request: u64,
     pending_jump: Option<PendingJump>,
-    original_scroll_n: Option<Vec<Action>>,
-    original_scroll_p: Option<Vec<Action>>,
-    keybind_snapshot_ready: bool,
-    scroll_navigation_bound: bool,
     dialog_request: u64,
     plugin_id: Option<u32>,
     dialog_is_floating: bool,
@@ -175,13 +170,13 @@ impl State {
         if self.case_sensitive {
             line.contains(needle)
         } else {
-            line.to_lowercase().contains(folded_needle)
+            line.to_ascii_lowercase().contains(folded_needle)
         }
     }
 
     fn search(&mut self) {
         let needle = self.query.trim().to_owned();
-        let folded_needle = needle.to_lowercase();
+        let folded_needle = needle.to_ascii_lowercase();
         self.results.clear();
         self.selected = 0;
 
@@ -253,7 +248,6 @@ impl State {
             } else {
                 format!("{} match(es).", self.results.len())
             };
-            self.bind_scroll_navigation();
         }
     }
 
@@ -278,102 +272,6 @@ impl State {
             .unwrap_or(result.line_number.min(lines.len() - 1));
 
         Some(selected_index.saturating_sub(result.pane_rows / 2))
-    }
-
-    fn keybind_pipe_action(plugin_id: u32, name: &str) -> Action {
-        Action::KeybindPipe {
-            name: Some(name.to_owned()),
-            payload: None,
-            args: None,
-            plugin: None,
-            plugin_id: Some(plugin_id),
-            configuration: None,
-            launch_new: false,
-            skip_cache: false,
-            floating: None,
-            in_place: None,
-            cwd: None,
-            pane_title: None,
-        }
-    }
-
-    fn capture_scroll_navigation_snapshot(&mut self, keybinds: &KeybindsVec) {
-        if self.keybind_snapshot_ready {
-            return;
-        }
-
-        let scroll_bindings = keybinds
-            .iter()
-            .find(|(mode, _)| *mode == InputMode::Scroll)
-            .map(|(_, bindings)| bindings.as_slice())
-            .unwrap_or(&[]);
-
-        let n_key = KeyWithModifier::new(BareKey::Char('n'));
-        let p_key = KeyWithModifier::new(BareKey::Char('p'));
-
-        self.original_scroll_n = scroll_bindings
-            .iter()
-            .find(|(key, _)| *key == n_key)
-            .map(|(_, actions)| actions.clone());
-        self.original_scroll_p = scroll_bindings
-            .iter()
-            .find(|(key, _)| *key == p_key)
-            .map(|(_, actions)| actions.clone());
-        self.keybind_snapshot_ready = true;
-    }
-
-    fn bind_scroll_navigation(&mut self) {
-        if self.scroll_navigation_bound || !self.permissions_granted {
-            return;
-        }
-        let Some(plugin_id) = self.plugin_id else {
-            return;
-        };
-        if !self.keybind_snapshot_ready {
-            return;
-        }
-
-        rebind_keys(
-            vec![],
-            vec![
-                (
-                    InputMode::Scroll,
-                    KeyWithModifier::new(BareKey::Char('n')),
-                    vec![Self::keybind_pipe_action(plugin_id, "next")],
-                ),
-                (
-                    InputMode::Scroll,
-                    KeyWithModifier::new(BareKey::Char('p')),
-                    vec![Self::keybind_pipe_action(plugin_id, "previous")],
-                ),
-            ],
-            false,
-        );
-        self.scroll_navigation_bound = true;
-    }
-
-    fn restore_scroll_navigation(&mut self) {
-        if !self.scroll_navigation_bound || !self.permissions_granted {
-            return;
-        }
-
-        let n_key = KeyWithModifier::new(BareKey::Char('n'));
-        let p_key = KeyWithModifier::new(BareKey::Char('p'));
-        let mut rebind = vec![];
-
-        if let Some(actions) = self.original_scroll_n.clone() {
-            rebind.push((InputMode::Scroll, n_key.clone(), actions));
-        }
-        if let Some(actions) = self.original_scroll_p.clone() {
-            rebind.push((InputMode::Scroll, p_key.clone(), actions));
-        }
-
-        rebind_keys(
-            vec![(InputMode::Scroll, n_key), (InputMode::Scroll, p_key)],
-            rebind,
-            false,
-        );
-        self.scroll_navigation_bound = false;
     }
 
     fn own_pane_id(&self) -> Option<PaneId> {
@@ -552,7 +450,6 @@ impl State {
             correction_direction: CorrectionDirection::None,
             query,
             case_sensitive: self.case_sensitive,
-            search_installed: false,
             request,
         });
 
@@ -604,17 +501,13 @@ impl State {
         };
 
         if pending.correction_steps_remaining == 0 {
-            if pending.search_installed {
-                self.pending_jump = None;
-            } else {
-                self.run_jump_action(
-                    Action::SwitchToMode {
-                        input_mode: InputMode::Scroll,
-                    },
-                    request,
-                    "scroll-mode",
-                );
-            }
+            self.run_jump_action(
+                Action::SwitchToMode {
+                    input_mode: InputMode::Scroll,
+                },
+                request,
+                "scroll-mode",
+            );
             return;
         }
 
@@ -728,14 +621,7 @@ impl State {
                 );
             }
             "set-search" => {
-                let Some(pending) = self.pending_jump.as_mut() else {
-                    return false;
-                };
-                pending.search_installed = true;
-                pending.page_steps_remaining = pending.target_top / pending.pane_rows;
-                pending.correction_steps_remaining = 0;
-                pending.correction_direction = CorrectionDirection::None;
-                self.run_jump_action(Action::ScrollToTop, request, "top");
+                self.pending_jump = None;
             }
             _ => {}
         }
@@ -753,13 +639,11 @@ impl State {
     }
 
     fn edit_query(&mut self) {
-        self.restore_scroll_navigation();
         self.mode = Mode::Input;
         self.status = "Edit the query and press Enter to refresh results.".to_owned();
     }
 
     fn reset_search(&mut self) {
-        self.restore_scroll_navigation();
         self.query.clear();
         self.results.clear();
         self.results_query.clear();
@@ -885,7 +769,6 @@ impl ZellijPlugin for State {
             EventType::Key,
             EventType::PaneUpdate,
             EventType::PermissionRequestResult,
-            EventType::InitialKeybinds,
             EventType::ActionComplete,
         ]);
 
@@ -894,7 +777,6 @@ impl ZellijPlugin for State {
             PermissionType::ReadPaneContents,
             PermissionType::ChangeApplicationState,
             PermissionType::RunActionsAsUser,
-            PermissionType::Reconfigure,
         ]);
     }
 
@@ -902,9 +784,6 @@ impl ZellijPlugin for State {
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permissions_granted = true;
-                if !self.results.is_empty() && self.query.trim() == self.results_query {
-                    self.bind_scroll_navigation();
-                }
                 if self.pending_open {
                     self.open();
                     return true;
@@ -915,13 +794,6 @@ impl ZellijPlugin for State {
                 self.permissions_granted = false;
                 self.pending_open = false;
                 self.pending_jump = None;
-                false
-            }
-            Event::InitialKeybinds(keybinds) => {
-                self.capture_scroll_navigation_snapshot(&keybinds);
-                if !self.results.is_empty() && self.query.trim() == self.results_query {
-                    self.bind_scroll_navigation();
-                }
                 false
             }
             Event::PaneUpdate(manifest) => {
