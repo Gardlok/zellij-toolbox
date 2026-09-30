@@ -279,8 +279,10 @@ impl State {
     fn regex_escape_literal(value: &str) -> String {
         let mut escaped = String::with_capacity(value.len() + 8);
         for character in value.chars() {
-            if matches!(character, '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$') {
-                escaped.push('\\');
+            match character {
+                '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}'
+                | '^' | '$' => escaped.push('\\'),
+                _ => {}
             }
             escaped.push(character);
         }
