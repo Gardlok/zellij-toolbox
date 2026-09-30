@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zellij_tile::prelude::actions::{Action, SearchDirection, SearchOption};
+use zellij_tile::prelude::actions::{Action, SearchOption};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
@@ -23,8 +23,6 @@ struct PendingJump {
     correction_direction: CorrectionDirection,
     query: String,
     case_sensitive: bool,
-    active_search_direction: SearchDirection,
-    active_search_steps_remaining: usize,
     request: u64,
 }
 
@@ -146,6 +144,7 @@ impl State {
 
         let should_float = self.floating_preference.unwrap_or(true);
         self.pending_float_resize = should_float;
+        switch_to_input_mode(&InputMode::Normal);
         show_self(should_float);
     }
 
@@ -245,26 +244,7 @@ impl State {
         };
     }
 
-    fn literal_occurrences(line: &str, query: &str, case_sensitive: bool) -> usize {
-        if query.is_empty() {
-            return 0;
-        }
-
-        if case_sensitive {
-            line.match_indices(query).count()
-        } else {
-            line.to_ascii_lowercase()
-                .match_indices(&query.to_ascii_lowercase())
-                .count()
-        }
-    }
-
-    fn resolve_jump_target(
-        &self,
-        result: &SearchResult,
-        query: &str,
-        case_sensitive: bool,
-    ) -> Option<(usize, SearchDirection, usize)> {
+    fn resolve_target_top(&self, result: &SearchResult) -> Option<usize> {
         let pane_id = PaneId::Terminal(result.pane_id);
         let contents = get_pane_scrollback(pane_id, true).ok()?;
 
@@ -284,28 +264,7 @@ impl State {
             .map(|(index, _)| index)
             .unwrap_or(result.line_number.min(lines.len() - 1));
 
-        let target_top = selected_index.saturating_sub(result.pane_rows / 2);
-        let viewport_end = (target_top + result.pane_rows).min(lines.len());
-
-        let matches_before_target = lines[target_top..selected_index]
-            .iter()
-            .map(|line| Self::literal_occurrences(line, query, case_sensitive))
-            .sum::<usize>();
-        let target_occurrence = matches_before_target + 1;
-        let visible_matches = lines[target_top..viewport_end]
-            .iter()
-            .map(|line| Self::literal_occurrences(line, query, case_sensitive))
-            .sum::<usize>()
-            .max(target_occurrence);
-
-        let down_steps = target_occurrence;
-        let up_steps = visible_matches.saturating_sub(target_occurrence) + 1;
-
-        if down_steps <= up_steps {
-            Some((target_top, SearchDirection::Down, down_steps))
-        } else {
-            Some((target_top, SearchDirection::Up, up_steps))
-        }
+        Some(selected_index.saturating_sub(result.pane_rows / 2))
     }
 
     fn own_pane_id(&self) -> Option<PaneId> {
@@ -378,9 +337,7 @@ impl State {
         };
 
         let query = self.query.trim().to_owned();
-        let Some((target_top, active_search_direction, active_search_steps_remaining)) =
-            self.resolve_jump_target(&result, &query, self.case_sensitive)
-        else {
+        let Some(target_top) = self.resolve_target_top(&result) else {
             self.status = "Could not re-resolve that result in current scrollback.".to_owned();
             return;
         };
@@ -396,8 +353,6 @@ impl State {
             correction_direction: CorrectionDirection::None,
             query,
             case_sensitive: self.case_sensitive,
-            active_search_direction,
-            active_search_steps_remaining,
             request,
         });
 
@@ -465,31 +420,6 @@ impl State {
             CorrectionDirection::None => return,
         };
         self.run_jump_action(action, request, "correct");
-    }
-
-    fn run_next_active_search_step(&mut self, request: u64) {
-        let Some(pending) = self.pending_jump.as_ref() else {
-            return;
-        };
-
-        if pending.active_search_steps_remaining == 0 {
-            self.run_jump_action(
-                Action::SwitchToMode {
-                    input_mode: InputMode::Search,
-                },
-                request,
-                "search-mode",
-            );
-            return;
-        }
-
-        self.run_jump_action(
-            Action::Search {
-                direction: pending.active_search_direction,
-            },
-            request,
-            "activate-search",
-        );
     }
 
     fn handle_jump_action_complete(&mut self, context: BTreeMap<String, String>) -> bool {
@@ -594,16 +524,6 @@ impl State {
                 );
             }
             "set-search" => {
-                self.run_next_active_search_step(request);
-            }
-            "activate-search" => {
-                if let Some(pending) = self.pending_jump.as_mut() {
-                    pending.active_search_steps_remaining =
-                        pending.active_search_steps_remaining.saturating_sub(1);
-                }
-                self.run_next_active_search_step(request);
-            }
-            "search-mode" => {
                 self.pending_jump = None;
             }
             _ => {}
