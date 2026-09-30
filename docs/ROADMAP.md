@@ -84,13 +84,26 @@ Qualified and runtime-verified on Midas while preserving the existing plugin UX:
 - stale restored marks remain visible and deletable but cannot trigger a blind offset jump;
 - keep live-mark offset fallback behavior for the current plugin instance.
 
+## Current development: zgrep fuzzy result picker
+
+Add a richer dependency-free picker layer without changing zgrep's qualified destination engine:
+
+- keep the literal search query as the only source of real zgrep results;
+- add a third Filter mode over the already-buffered literal result set;
+- fuzzy-match result text plus pane/tab/title metadata case-insensitively;
+- rank filtered results while retaining original result indices as destination authority;
+- keep List-mode navigation and exact Enter jump behavior;
+- let Tab retain a fuzzy filter and Esc clear it;
+- refuse Enter when a fuzzy filter has no visible result;
+- preserve native highlight sequencing, case/scope semantics, Scroll-mode `n/p`, hide/reopen state, and float/dock behavior;
+- keep the milestone dependency-free after evaluating ratatui's backend/dependency cost for this Zellij WASM use case.
+
 ## Follow-up ideas
 
 ### zgrep
 
-- evaluate ratatui for a richer picker UI in a separate dependency/lockfile milestone
-- optional fuzzy filtering after literal exact-jump behavior is qualified
 - regex search mode
+- reconsider ratatui only if a future picker feature needs layout/widget behavior that direct Zellij rendering cannot provide cleanly
 
 ### zmark
 
