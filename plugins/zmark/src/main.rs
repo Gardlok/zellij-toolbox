@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use zellij_tile::prelude::*;
 
 register_plugin!(State);
 
 #[derive(Clone)]
 struct Mark {
+    id: u128,
     pane_id: u32,
     tab_index: usize,
     title: String,
@@ -12,6 +14,7 @@ struct Mark {
     top_offset: usize,
     cursor_row: usize,
     anchor: String,
+    restored: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -37,10 +40,244 @@ struct State {
     selected: usize,
     notice: String,
     rename_buffer: String,
+    session_name: String,
+    companion_path: String,
+    state_loaded: bool,
+    load_request: u64,
+    persistence_error: Option<String>,
 }
 
 impl State {
+    fn refresh_environment(&mut self) {
+        let env = get_session_environment_variables();
+        self.session_name = env
+            .get("ZELLIJ_SESSION_NAME")
+            .cloned()
+            .unwrap_or_else(|| "zellij".to_owned());
+
+        self.companion_path = env
+            .get("HOME")
+            .map(|home| format!("{home}/.local/bin/zellij-toolbox-zmark"))
+            .unwrap_or_else(|| "zellij-toolbox-zmark".to_owned());
+    }
+
+    fn decode_hex(value: &str) -> Option<String> {
+        if value.len() % 2 != 0 {
+            return None;
+        }
+
+        let mut bytes = Vec::with_capacity(value.len() / 2);
+        let mut index = 0;
+        while index < value.len() {
+            let byte = u8::from_str_radix(&value[index..index + 2], 16).ok()?;
+            bytes.push(byte);
+            index += 2;
+        }
+
+        String::from_utf8(bytes).ok()
+    }
+
+    fn next_mark_id(&self) -> u128 {
+        let mut id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(1);
+
+        while self.marks.iter().any(|mark| mark.id == id) {
+            id = id.saturating_add(1);
+        }
+
+        id
+    }
+
+    fn request_load(&mut self) {
+        self.load_request = self.load_request.saturating_add(1);
+
+        let mut context = BTreeMap::new();
+        context.insert("zmark-op".to_owned(), "load".to_owned());
+        context.insert("zmark-request".to_owned(), self.load_request.to_string());
+
+        run_command(
+            &[
+                &self.companion_path,
+                "list-machine",
+                &self.session_name,
+            ],
+            context,
+        );
+    }
+
+    fn apply_load_result(
+        &mut self,
+        exit_code: Option<i32>,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+        context: BTreeMap<String, String>,
+    ) -> bool {
+        if context.get("zmark-op").map(String::as_str) != Some("load") {
+            return false;
+        }
+
+        let request = context
+            .get("zmark-request")
+            .and_then(|value| value.parse::<u64>().ok());
+        if request != Some(self.load_request) {
+            return false;
+        }
+
+        self.state_loaded = true;
+
+        if exit_code != Some(0) {
+            let error = String::from_utf8_lossy(&stderr).trim().to_owned();
+            self.persistence_error = Some(if error.is_empty() {
+                "durable state helper unavailable".to_owned()
+            } else {
+                error
+            });
+            self.run_pending();
+            return self.view != View::Hidden;
+        }
+
+        let output = String::from_utf8_lossy(&stdout);
+        let mut marks = Vec::new();
+
+        for line in output.lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() != 8 {
+                continue;
+            }
+
+            let Ok(id) = fields[0].parse::<u128>() else {
+                continue;
+            };
+            let Ok(pane_id) = fields[1].parse::<u32>() else {
+                continue;
+            };
+            let Ok(tab_index) = fields[2].parse::<usize>() else {
+                continue;
+            };
+            let Ok(top_offset) = fields[3].parse::<usize>() else {
+                continue;
+            };
+            let Ok(cursor_row) = fields[4].parse::<usize>() else {
+                continue;
+            };
+            let Some(title) = Self::decode_hex(fields[5]) else {
+                continue;
+            };
+            let Some(name) = Self::decode_hex(fields[6]) else {
+                continue;
+            };
+            let Some(anchor) = Self::decode_hex(fields[7]) else {
+                continue;
+            };
+
+            marks.push(Mark {
+                id,
+                pane_id,
+                tab_index,
+                title,
+                name: if name.is_empty() { None } else { Some(name) },
+                top_offset,
+                cursor_row,
+                anchor,
+                restored: true,
+            });
+        }
+
+        self.marks = marks;
+        self.selected = self.selected.min(self.marks.len().saturating_sub(1));
+        self.persistence_error = None;
+        self.run_pending();
+        self.view != View::Hidden
+    }
+
+    fn persistence_context() -> BTreeMap<String, String> {
+        BTreeMap::from([("zmark-op".to_owned(), "persist".to_owned())])
+    }
+
+    fn persist_add(&self, mark: &Mark) {
+        let id = mark.id.to_string();
+        let pane_id = mark.pane_id.to_string();
+        let tab_index = mark.tab_index.to_string();
+        let top_offset = mark.top_offset.to_string();
+        let cursor_row = mark.cursor_row.to_string();
+        let name = mark.name.as_deref().unwrap_or("");
+
+        run_command(
+            &[
+                &self.companion_path,
+                "add",
+                &self.session_name,
+                &id,
+                &pane_id,
+                &tab_index,
+                &top_offset,
+                &cursor_row,
+                &mark.title,
+                name,
+                &mark.anchor,
+            ],
+            Self::persistence_context(),
+        );
+    }
+
+    fn persist_rename(&self, id: u128, name: &str) {
+        let id = id.to_string();
+        run_command(
+            &[
+                &self.companion_path,
+                "rename",
+                &self.session_name,
+                &id,
+                name,
+            ],
+            Self::persistence_context(),
+        );
+    }
+
+    fn persist_delete(&self, id: u128) {
+        let id = id.to_string();
+        run_command(
+            &[
+                &self.companion_path,
+                "delete",
+                &self.session_name,
+                &id,
+            ],
+            Self::persistence_context(),
+        );
+    }
+
+    fn apply_persist_result(
+        &mut self,
+        exit_code: Option<i32>,
+        stderr: Vec<u8>,
+        context: BTreeMap<String, String>,
+    ) -> bool {
+        if context.get("zmark-op").map(String::as_str) != Some("persist") {
+            return false;
+        }
+
+        if exit_code == Some(0) {
+            self.persistence_error = None;
+        } else {
+            let error = String::from_utf8_lossy(&stderr).trim().to_owned();
+            self.persistence_error = Some(if error.is_empty() {
+                "could not save durable mark state".to_owned()
+            } else {
+                error
+            });
+        }
+
+        self.view == View::List
+    }
+
     fn run_pending(&mut self) {
+        if !self.state_loaded {
+            return;
+        }
+
         let Some(action) = self.pending_action.take() else {
             return;
         };
@@ -52,21 +289,22 @@ impl State {
         }
     }
 
+    fn show_notice(&mut self, notice: String) {
+        self.notice = notice;
+        self.view = View::Notice;
+        show_self(true);
+        set_timeout(1.5);
+    }
+
     fn add_mark(&mut self) {
         let Ok((tab_index, PaneId::Terminal(pane_id))) = get_focused_pane_info() else {
-            self.notice = "zmark: focused pane is not a terminal pane".to_owned();
-            self.view = View::Notice;
-            show_self(true);
-            set_timeout(1.5);
+            self.show_notice("zmark: focused pane is not a terminal pane".to_owned());
             return;
         };
 
         let pane = get_pane_info(PaneId::Terminal(pane_id));
         let Ok(contents) = get_pane_scrollback(PaneId::Terminal(pane_id), true) else {
-            self.notice = "zmark: could not read pane scrollback".to_owned();
-            self.view = View::Notice;
-            show_self(true);
-            set_timeout(1.5);
+            self.show_notice("zmark: could not read pane scrollback".to_owned());
             return;
         };
 
@@ -94,7 +332,8 @@ impl State {
             .map(|pane| pane.title.clone())
             .unwrap_or_else(|| format!("pane {}", pane_id));
 
-        self.marks.push(Mark {
+        let mark = Mark {
+            id: self.next_mark_id(),
             pane_id,
             tab_index,
             title,
@@ -102,12 +341,17 @@ impl State {
             top_offset: contents.lines_above_viewport.len(),
             cursor_row,
             anchor,
-        });
+            restored: false,
+        };
 
+        self.persist_add(&mark);
+        self.marks.push(mark);
         self.selected = self.marks.len().saturating_sub(1);
-        self.notice = format!("Marked pane {} ({} mark(s))", pane_id, self.marks.len());
-        self.view = View::Notice;
-        show_self(true);
+        self.show_notice(format!(
+            "Marked pane {} ({} mark(s))",
+            pane_id,
+            self.marks.len()
+        ));
         set_timeout(1.0);
     }
 
@@ -128,9 +372,21 @@ impl State {
 
     fn finish_rename(&mut self) {
         let name = self.rename_buffer.trim().to_owned();
-        if let Some(mark) = self.marks.get_mut(self.selected) {
-            mark.name = if name.is_empty() { None } else { Some(name) };
+        let persisted = if let Some(mark) = self.marks.get_mut(self.selected) {
+            mark.name = if name.is_empty() {
+                None
+            } else {
+                Some(name.clone())
+            };
+            Some((mark.id, name))
+        } else {
+            None
+        };
+
+        if let Some((id, name)) = persisted {
+            self.persist_rename(id, &name);
         }
+
         self.rename_buffer.clear();
         self.view = View::List;
     }
@@ -142,30 +398,47 @@ impl State {
 
         let pane_id = PaneId::Terminal(mark.pane_id);
         let Some(info) = get_pane_info(pane_id) else {
-            self.notice = format!("Pane {} no longer exists", mark.pane_id);
-            self.view = View::Notice;
-            set_timeout(1.5);
+            self.show_notice(format!(
+                "Stale mark: pane {} no longer exists",
+                mark.pane_id
+            ));
             return;
         };
 
+        let Ok(contents) = get_pane_scrollback(pane_id, true) else {
+            self.show_notice(format!(
+                "Stale mark: pane {} scrollback is unavailable",
+                mark.pane_id
+            ));
+            return;
+        };
+
+        let mut lines = contents.lines_above_viewport;
+        lines.extend(contents.viewport);
+        lines.extend(contents.lines_below_viewport);
+
         let mut target_top = mark.top_offset;
+        let mut anchor_resolved = false;
 
         if !mark.anchor.is_empty() {
-            if let Ok(contents) = get_pane_scrollback(pane_id, true) {
-                let mut lines = contents.lines_above_viewport;
-                lines.extend(contents.viewport);
-                lines.extend(contents.lines_below_viewport);
-
-                let original_anchor_index = mark.top_offset + mark.cursor_row;
-                if let Some((match_index, _)) = lines
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, line)| **line == mark.anchor)
-                    .min_by_key(|(index, _)| index.abs_diff(original_anchor_index))
-                {
-                    target_top = match_index.saturating_sub(mark.cursor_row);
-                }
+            let original_anchor_index = mark.top_offset + mark.cursor_row;
+            if let Some((match_index, _)) = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| **line == mark.anchor)
+                .min_by_key(|(index, _)| index.abs_diff(original_anchor_index))
+            {
+                target_top = match_index.saturating_sub(mark.cursor_row);
+                anchor_resolved = true;
             }
+        }
+
+        if mark.restored && !anchor_resolved {
+            self.show_notice(format!(
+                "Stale mark: saved anchor for pane {} could not be re-resolved",
+                mark.pane_id
+            ));
+            return;
         }
 
         self.view = View::Hidden;
@@ -208,7 +481,8 @@ impl State {
                 BareKey::Char('n') => self.begin_rename(),
                 BareKey::Char('d') => {
                     if !self.marks.is_empty() {
-                        self.marks.remove(self.selected);
+                        let removed = self.marks.remove(self.selected);
+                        self.persist_delete(removed.id);
                         self.selected = self.selected.min(self.marks.len().saturating_sub(1));
                     }
                 }
@@ -243,12 +517,15 @@ impl ZellijPlugin for State {
             EventType::Key,
             EventType::Timer,
             EventType::PermissionRequestResult,
+            EventType::RunCommandResult,
         ]);
 
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ReadPaneContents,
             PermissionType::ChangeApplicationState,
+            PermissionType::RunCommands,
+            PermissionType::ReadSessionEnvironmentVariables,
         ]);
     }
 
@@ -256,13 +533,21 @@ impl ZellijPlugin for State {
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permissions_granted = true;
-                self.run_pending();
+                self.refresh_environment();
+                self.request_load();
                 true
             }
             Event::PermissionRequestResult(PermissionStatus::Denied) => {
                 self.permissions_granted = false;
                 self.pending_action = None;
                 false
+            }
+            Event::RunCommandResult(exit_code, stdout, stderr, context) => {
+                if context.get("zmark-op").map(String::as_str) == Some("load") {
+                    self.apply_load_result(exit_code, stdout, stderr, context)
+                } else {
+                    self.apply_persist_result(exit_code, stderr, context)
+                }
             }
             Event::Timer(_) if self.view == View::Notice => {
                 self.view = View::Hidden;
@@ -276,7 +561,7 @@ impl ZellijPlugin for State {
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         if matches!(pipe_message.name.as_str(), "mark" | "open") {
-            if self.permissions_granted {
+            if self.permissions_granted && self.state_loaded {
                 match pipe_message.name.as_str() {
                     "mark" => self.add_mark(),
                     "open" => self.open_list(),
@@ -299,13 +584,17 @@ impl ZellijPlugin for State {
                 println!("{}", self.notice);
             }
             View::List => {
-                println!("zmark — session bookmarks");
+                println!("zmark — durable bookmarks");
+                if let Some(error) = &self.persistence_error {
+                    println!("Persistence unavailable: {}", error);
+                }
                 println!();
 
                 if self.marks.is_empty() {
                     println!("No marks yet.");
                 } else {
-                    let available = rows.saturating_sub(5).max(1);
+                    let reserved = if self.persistence_error.is_some() { 6 } else { 5 };
+                    let available = rows.saturating_sub(reserved).max(1);
                     let start = self.selected.saturating_sub(available.saturating_sub(1));
                     let end = (start + available).min(self.marks.len());
 
@@ -334,7 +623,9 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!("Up/Down: select   Enter: jump   n: name/rename   d: delete   Esc: close");
+                println!(
+                    "Up/Down: select   Enter: jump   n: name/rename   d: delete   Esc: close"
+                );
             }
             View::Rename => {
                 println!("zmark — name bookmark");
