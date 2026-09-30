@@ -625,33 +625,6 @@ impl State {
                 );
             }
             "clear-search" => {
-                let Some((case_sensitive, query)) = self
-                    .pending_jump
-                    .as_ref()
-                    .map(|pending| (pending.case_sensitive, pending.query.clone()))
-                else {
-                    return false;
-                };
-
-                if !case_sensitive {
-                    self.run_jump_action(
-                        Action::SearchToggleOption {
-                            option: SearchOption::CaseSensitivity,
-                        },
-                        request,
-                        "sync-case",
-                    );
-                } else {
-                    self.run_jump_action(
-                        Action::SearchInput {
-                            input: query.into_bytes(),
-                        },
-                        request,
-                        "set-search",
-                    );
-                }
-            }
-            "sync-case" => {
                 let Some(query) = self
                     .pending_jump
                     .as_ref()
@@ -669,6 +642,33 @@ impl State {
                 );
             }
             "set-search" => {
+                let case_sensitive = self
+                    .pending_jump
+                    .as_ref()
+                    .map(|pending| pending.case_sensitive)
+                    .unwrap_or(true);
+
+                // Zellij rebuilds native search state on every SearchInput, so case
+                // sensitivity must be applied after installing the query.
+                if !case_sensitive {
+                    self.run_jump_action(
+                        Action::SearchToggleOption {
+                            option: SearchOption::CaseSensitivity,
+                        },
+                        request,
+                        "sync-case",
+                    );
+                } else {
+                    self.run_jump_action(
+                        Action::Search {
+                            direction: SearchDirection::Down,
+                        },
+                        request,
+                        "activate-highlight",
+                    );
+                }
+            }
+            "sync-case" => {
                 self.run_jump_action(
                     Action::Search {
                         direction: SearchDirection::Down,
