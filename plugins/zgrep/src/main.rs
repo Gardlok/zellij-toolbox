@@ -180,7 +180,6 @@ impl State {
         }
     }
 
-
     fn fuzzy_score(candidate: &str, pattern: &str) -> Option<i64> {
         if pattern.is_empty() {
             return Some(0);
@@ -254,12 +253,7 @@ impl State {
                 })
                 .collect();
 
-            scored.sort_by(|left, right| {
-                right
-                    .0
-                    .cmp(&left.0)
-                    .then_with(|| left.1.cmp(&right.1))
-            });
+            scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
             self.filtered_results = scored.into_iter().map(|(_, index)| index).collect();
         }
 
