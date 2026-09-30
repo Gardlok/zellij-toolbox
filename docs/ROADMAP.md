@@ -62,10 +62,10 @@ Refactor zgrep around a strict ownership boundary while preserving literal cross
 - buffered results survive hide/reopen and remain valid only while the current query still matches the query that produced them;
 - exact jumps are re-resolved against current scrollback and serialized through `ActionComplete`;
 - selected rows are placed near the vertical center using coarse page movement plus measured one-line correction;
-- native Zellij search is used only to render visible highlights after the first exact positioning pass;
-- after native search installs its case option and query, zgrep repeats the exact positioning pass so any native-search viewport movement is overwritten;
-- Scroll-mode `n/p` navigation is installed at runtime with direct plugin-id keybind pipes while a valid result buffer exists;
-- original Scroll-mode `n/p` bindings are snapshotted from `InitialKeybinds` and restored when the search is edited/reset;
+- native Zellij search is used only to render visible highlights after exact positioning;
+- zgrep aligns case-insensitive matching with Zellij 0.45.1's ASCII-insensitive native search, centers the selected hit first, then installs the native query and stops so the highlight remains visible;
+- Scroll-mode `n/p` navigation uses explicit KDL `MessagePlugin` bindings that send next/previous into zgrep's buffered current-pane navigation;
+- plugin-side runtime key rebinding is intentionally not used because Zellij 0.45.1's plugin action serializer drops the KeybindPipe name/plugin-id payload;
 - `Ctrl+F` float/dock transitions are serialized, followed by explicit zgrep refocus and floating resize;
 - opening zgrep restores Normal input mode so terminal Scroll/Search modes do not leak into dialog input.
 
