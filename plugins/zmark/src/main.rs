@@ -107,11 +107,7 @@ impl State {
         context.insert("zmark-request".to_owned(), self.load_request.to_string());
 
         run_command(
-            &[
-                &self.companion_path,
-                "list-machine",
-                &self.session_name,
-            ],
+            &[&self.companion_path, "list-machine", &self.session_name],
             context,
         );
     }
@@ -378,11 +374,7 @@ impl State {
     fn finish_rename(&mut self) {
         let name = self.rename_buffer.trim().to_owned();
         let persisted = if let Some(mark) = self.marks.get_mut(self.selected) {
-            mark.name = if name.is_empty() {
-                None
-            } else {
-                Some(name)
-            };
+            mark.name = if name.is_empty() { None } else { Some(name) };
             mark.revision = Self::next_revision(mark.revision);
             Some(mark.clone())
         } else {
@@ -600,7 +592,11 @@ impl ZellijPlugin for State {
                 if self.marks.is_empty() {
                     println!("No marks yet.");
                 } else {
-                    let reserved = if self.persistence_error.is_some() { 6 } else { 5 };
+                    let reserved = if self.persistence_error.is_some() {
+                        6
+                    } else {
+                        5
+                    };
                     let available = rows.saturating_sub(reserved).max(1);
                     let start = self.selected.saturating_sub(available.saturating_sub(1));
                     let end = (start + available).min(self.marks.len());
@@ -630,9 +626,7 @@ impl ZellijPlugin for State {
                 }
 
                 println!();
-                println!(
-                    "Up/Down: select   Enter: jump   n: name/rename   d: delete   Esc: close"
-                );
+                println!("Up/Down: select   Enter: jump   n: name/rename   d: delete   Esc: close");
             }
             View::Rename => {
                 println!("zmark — name bookmark");
