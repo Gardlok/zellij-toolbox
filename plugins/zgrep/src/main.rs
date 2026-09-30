@@ -135,7 +135,7 @@ impl State {
             }
 
             self.status = "Type a search term and press Enter.".to_owned();
-        } else if self.results.is_empty() {
+        } else if self.results.is_empty() || self.query.trim() != self.results_query {
             self.mode = Mode::Input;
             self.status = "Resume the query and press Enter.".to_owned();
         } else {
