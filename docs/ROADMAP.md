@@ -53,22 +53,23 @@ Qualified and runtime-verified on Midas without adding another service:
 - jump with Zellij's native session/pane switching API rather than invoking the helper for navigation;
 - ignore stale asynchronous refresh responses and stale session generations.
 
-## Current development: zgrep-owned search, highlighting, and pane navigation
+## Current development: zgrep-owned destination with native highlight rendering
 
 Refactor zgrep around a strict ownership boundary while preserving literal cross-pane search:
 
 - zgrep owns query, case sensitivity, scope, result ordering, exact selected occurrence, buffered results, centering, and dialog placement;
 - explicit Input/List modes keep query editing separate from result navigation;
-- buffered results survive hide/reopen, but are valid only while the current query still matches the query that produced them;
+- buffered results survive hide/reopen and remain valid only while the current query still matches the query that produced them;
 - exact jumps are re-resolved against current scrollback and serialized through `ActionComplete`;
 - selected rows are placed near the vertical center using coarse page movement plus measured one-line correction;
-- native Zellij search state is not used after jumps;
-- highlighting is plugin-owned through `set_pane_regex_highlights` with escaped literal patterns, zgrep-controlled case semantics, `Emphasis0`, bold + underline, and the `ActionFeedback` layer;
-- Scroll-mode-only `n`/`p` message bindings navigate zgrep's buffered matches in the current pane and rerun the exact jump engine, without conflicting with Normal-mode pane controls;
+- native Zellij search is used only to render visible highlights after the first exact positioning pass;
+- after native search installs its case option and query, zgrep repeats the exact positioning pass so any native-search viewport movement is overwritten;
+- Scroll-mode `n/p` navigation is installed at runtime with direct plugin-id keybind pipes while a valid result buffer exists;
+- original Scroll-mode `n/p` bindings are snapshotted from `InitialKeybinds` and restored when the search is edited/reset;
 - `Ctrl+F` float/dock transitions are serialized, followed by explicit zgrep refocus and floating resize;
 - opening zgrep restores Normal input mode so terminal Scroll/Search modes do not leak into dialog input.
 
-Superseded runtime candidates relied on fire-and-forget scrolling, native-search-owned occurrence navigation, native search as a supposedly passive highlighter, or global next/previous bindings. Those approaches were rejected because they could move to case-equivalent/duplicate matches, depended on missing default bindings under `clear-defaults=true`, or conflicted with established controls.
+Superseded runtime candidates relied on native search as final destination authority, plugin regex highlighting in retained Scroll-mode history, URL-addressed manual Scroll-mode message bindings, or global next/previous bindings. Those approaches were rejected because they could move to case-equivalent/duplicate matches, failed to render visibly, depended on manual config, or conflicted with established controls.
 
 ## Follow-up ideas
 
