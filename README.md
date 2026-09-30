@@ -97,22 +97,24 @@ These are suggested defaults. Change them to fit your setup.
 
 ### zgrep
 
-zgrep searches retained scrollback across selectable terminal panes in the current Zellij session. It keeps literal search semantics and owns the result set, case mode, scope, selected occurrence, dialog state, and exact jump destination.
+zgrep searches retained scrollback across selectable terminal panes in the current Zellij session. It owns the query, case mode, scope, result ordering, selected exact occurrence, buffered results, centering target, and dialog state.
 
-The dialog has two explicit modes inspired by the state model used by community picker plugins such as zextract:
+The dialog has two explicit modes:
 
 - **Input** — edit the query and press Enter to run the search. Tab returns to the buffered list only when the current query still matches the query that produced that list.
-- **List** — Up/Down or `j`/`k` and `n`/`p` move through the buffered results. Enter jumps to the selected exact result. Tab, `/`, or `e` returns to Input. `c` toggles case sensitivity and refreshes the list, `s` cycles scope and refreshes, and `r` clears the search and starts over with the default case-insensitive, all-panes search semantics.
+- **List** — Up/Down or `j`/`k` and `n`/`p` move through the buffered results. Enter jumps to the selected exact result. Tab, `/`, or `e` returns to Input. `c` toggles case sensitivity and refreshes, `s` cycles scope and refreshes, and `r` clears the search and restores the default case-insensitive, all-panes semantics.
 
-Search state survives hide/reopen while the plugin instance lives. After jumping to a result, press `Alt+G` again to resume the same buffered list and selected row. zgrep does not require additional global next/previous keybindings.
+Search state survives hide/reopen while the plugin instance lives. After jumping to a result, `Alt+G` resumes the same buffered list and selected row.
 
 Selecting a result re-resolves that exact line against current retained scrollback, focuses the target pane, moves from the top with coarse page steps, re-measures the real viewport offset, and corrects one line at a time until the selected row is near the vertical center. Scroll mutations are serialized through Zellij `ActionComplete` events.
 
-Once the selected row is centered, zgrep enters Scroll mode, clears native search state, rebuilds the requested case option from that cleared default, and installs the query as a native search term **for passive highlighting only**. zgrep never asks native search to choose an occurrence or navigate, so equivalent case variants and duplicate matches cannot replace the zgrep-selected destination. The terminal application's live shell cursor remains at the bottom of its output; only the retained-history viewport moves.
+After positioning, zgrep leaves the client in Scroll mode and applies a **plugin-owned regex highlight only**. The pattern is built from the literal query with regex metacharacters escaped; case-insensitive mode uses an inline case-insensitive group. The highlight uses Zellij's plugin highlight API with `Emphasis0`, bold, underline, and the `ActionFeedback` layer. Native Zellij search state is not touched at all, so highlighting cannot reinterpret case, choose a different duplicate, or move the viewport.
 
-While the dialog is open, `Ctrl+F` toggles the same plugin pane between floating and docked. The transition is serialized: toggle the focused plugin pane, wait for completion, refocus the same zgrep pane, then resize floating mode to a centered 80% × 80% window. This preserves dialog focus in both directions. Reopening zgrep also restores Zellij Normal input mode so a terminal Scroll/Search mode cannot leak into the dialog.
+While viewing the jumped-to pane in Scroll mode, plain `n` and `p` can be bound specifically in the `scroll` mode to send `next`/`previous` messages back to zgrep. zgrep then advances through its own buffered matches **within the current pane**, wraps when needed, and reruns the same exact centering engine. Because these bindings exist only in Scroll mode, they do not conflict with Normal-mode pane/new-pane shortcuts.
 
-The current refactor deliberately remains dependency-free. The modal picker architecture was informed by `codingfragments/zellij-zextract`, but zgrep keeps its own literal cross-pane search and exact-jump engine. A future UI-only milestone can evaluate `ratatui` (and optionally fuzzy filtering) with a separately generated and qualified lockfile.
+While the dialog is open, `Ctrl+F` toggles the same plugin pane between floating and docked. The transition is serialized: toggle the focused plugin pane, wait for completion, refocus zgrep, then resize floating mode to a centered 80% × 80% window. Reopening zgrep restores Zellij Normal input mode so terminal history/search modes do not leak into plugin input.
+
+The current refactor deliberately remains dependency-free. Its Input/List state model was informed by community picker plugins such as `codingfragments/zellij-zextract`, while zgrep keeps its own literal cross-pane search and exact-jump engine. A future UI-only milestone can evaluate `ratatui` and fuzzy filtering with a separately generated and qualified lockfile.
 
 ### zmark
 
