@@ -866,6 +866,14 @@ impl State {
         self.selected = self.filtered_results[previous];
     }
 
+    fn start_picker_jump(&mut self) {
+        if self.filtered_results.contains(&self.selected) {
+            self.start_jump();
+        } else {
+            self.status = "No filtered result selected.".to_owned();
+        }
+    }
+
     fn select_adjacent_result_in_pane(&mut self, pane_id: u32, forward: bool) -> bool {
         let matching: Vec<usize> = self
             .results
@@ -941,7 +949,7 @@ impl State {
                 BareKey::Down | BareKey::Char('j') | BareKey::Char('n') => {
                     self.select_next_result();
                 }
-                BareKey::Enter => self.start_jump(),
+                BareKey::Enter => self.start_picker_jump(),
                 BareKey::Tab | BareKey::Char('/') | BareKey::Char('e') => {
                     self.edit_query();
                 }
@@ -964,7 +972,7 @@ impl State {
                     self.clear_filter();
                     self.mode = Mode::List;
                 }
-                BareKey::Enter => self.start_jump(),
+                BareKey::Enter => self.start_picker_jump(),
                 BareKey::Tab => {
                     self.mode = Mode::List;
                     self.update_picker_status();
