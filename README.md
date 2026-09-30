@@ -102,7 +102,7 @@ zgrep searches retained scrollback across selectable terminal panes in the curre
 The dialog has two explicit modes inspired by the state model used by community picker plugins such as zextract:
 
 - **Input** — edit the query and press Enter to run the search. Tab returns to the buffered list only when the current query still matches the query that produced that list.
-- **List** — Up/Down or `j`/`k` and `n`/`p` move through the buffered results. Enter jumps to the selected exact result. Tab, `/`, or `e` returns to Input. `c` toggles case sensitivity and refreshes the list, `s` cycles scope and refreshes, and `r` clears the search and starts over.
+- **List** — Up/Down or `j`/`k` and `n`/`p` move through the buffered results. Enter jumps to the selected exact result. Tab, `/`, or `e` returns to Input. `c` toggles case sensitivity and refreshes the list, `s` cycles scope and refreshes, and `r` clears the search and starts over with the default case-insensitive, all-panes search semantics.
 
 Search state survives hide/reopen while the plugin instance lives. After jumping to a result, press `Alt+G` again to resume the same buffered list and selected row. zgrep does not require additional global next/previous keybindings.
 
