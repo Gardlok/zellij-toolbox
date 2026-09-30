@@ -118,7 +118,15 @@ The current refactor remains dependency-free. Its Input/List state model was inf
 
 ### zmark
 
-Marks are session-local. A mark stores the pane, scroll position, and an anchor line so it can usually return to the same area even after more output appears.
+zmark stores bookmark metadata durably through the installed `zellij-toolbox-zmark` helper, so named marks can survive zmark plugin unload/reload without granting the WASM plugin full hard-drive access. No daemon is started.
+
+Marks remain scoped to the Zellij session name. A mark stores the pane, scroll position, and an anchor line. Live marks retain the existing offset fallback, while restored marks must re-resolve their saved anchor before zmark will jump; if the pane is gone or the anchor cannot be found, zmark reports the mark as stale instead of jumping blindly.
+
+The helper stores state under `$XDG_STATE_HOME/zellij-toolbox` when `XDG_STATE_HOME` is set, otherwise under `~/.local/state/zellij-toolbox`. You can inspect the stored marks with:
+
+```bash
+~/.local/bin/zellij-toolbox-zmark list
+```
 
 ### zdiffpane
 
