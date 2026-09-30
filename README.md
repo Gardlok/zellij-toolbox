@@ -108,7 +108,7 @@ Search state survives hide/reopen while the plugin instance lives. After a jump,
 
 Selecting a result re-resolves that exact line against current retained scrollback, focuses the target pane, moves from the top with coarse page steps, re-measures the real viewport offset, and corrects one line at a time until the selected row is near the vertical center. Scroll mutations are serialized through Zellij `ActionComplete` events.
 
-For visual highlighting, zgrep centers the exact selected result first, clears native search state, applies the requested case mode, installs the query, then activates one visible native search result so Zellij paints the search highlight. zgrep immediately re-measures and re-centers its own exact selected destination afterward, so native search is used as a renderer rather than as final navigation authority.
+For visual highlighting, zgrep centers the exact selected result first, clears native search state, installs the query, applies the requested case mode after query installation, then activates one visible native search result so Zellij paints the search highlight. zgrep immediately re-measures and re-centers its own exact selected destination afterward, so native search is used as a renderer rather than as final navigation authority.
 
 Plain `n` and `p` in Scroll mode are installed session-locally by zgrep after permission is granted. zgrep uses Zellij's runtime `reconfigure(..., false)` path with `MessagePluginId`, so the bindings target the already-running zgrep instance directly and do not modify `config.kdl`. Those bindings cycle buffered matches in the currently focused pane and rerun the exact centering engine.
 
