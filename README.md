@@ -99,10 +99,11 @@ These are suggested defaults. Change them to fit your setup.
 
 zgrep searches retained scrollback across selectable terminal panes in the current Zellij session. It owns the query, case mode, scope, result ordering, selected exact occurrence, buffered results, centering target, and dialog state.
 
-The dialog has two explicit modes:
+The dialog has three explicit modes:
 
-- **Input** — edit the query and press Enter to search. Tab returns to the buffered list only when the current query still matches the query that produced that list.
-- **List** — Up/Down or `j`/`k` and `n`/`p` move through buffered results. Enter jumps to the selected exact result. Tab, `/`, or `e` returns to Input. `c` toggles case sensitivity and refreshes, `s` cycles scope and refreshes, and `r` clears the search and restores case-insensitive/all-panes defaults.
+- **Input** — edit the literal query and press Enter to search. Tab returns to the buffered list only when the current query still matches the query that produced that list.
+- **List** — Up/Down or `j`/`k` and `n`/`p` move through buffered literal results. Enter jumps to the selected exact result. `f` enters fuzzy filtering. Tab, `/`, or `e` returns to Input. `c` toggles case sensitivity and refreshes, `s` cycles scope and refreshes, and `r` clears the search and restores case-insensitive/all-panes defaults.
+- **Filter** — type a case-insensitive fuzzy subsequence over the already-buffered result metadata/text. Up/Down moves through the ranked subset, Enter jumps, Tab keeps the filter and returns to List, and Esc clears the filter.
 
 Search state survives hide/reopen while the plugin instance lives. After a jump, `Alt+G` resumes the same buffered list and selected row.
 
@@ -114,7 +115,7 @@ Plain `n` and `p` in Scroll mode are installed session-locally by zgrep after pe
 
 While the dialog is open, `Ctrl+F` toggles the same plugin pane between floating and docked. The transition is serialized: toggle the focused plugin pane, wait for completion, refocus zgrep, then resize floating mode to a centered 80% × 80% window. Reopening zgrep restores Zellij Normal input mode so terminal history/search modes do not leak into plugin input.
 
-The current refactor remains dependency-free. Its Input/List state model was informed by community picker plugins such as `codingfragments/zellij-zextract`, while zgrep keeps its own literal cross-pane search and exact-jump engine. A future UI-only milestone can evaluate `ratatui` and fuzzy filtering with a separately generated and qualified lockfile.
+The picker remains dependency-free. Ratatui was evaluated for this UI-only milestone, but zgrep would need either an additional/custom WASM backend or a larger rendering dependency graph to reproduce output Zellij already provides. The fuzzy picker is therefore implemented directly over original buffered result indices, leaving the literal cross-pane search and exact-jump/highlight engine unchanged.
 
 ### zmark
 
