@@ -164,7 +164,16 @@ The helper prunes watches whose Zellij sessions are no longer running. Companion
 
 ### zcommandpalette
 
-The palette is a common front door for the toolbox. The suggested key is `Alt+;` because desktop environments commonly reserve `Alt+Space`. `zback` stays on Alt+B because opening the palette itself changes focus history.
+The palette is the toolbox home screen. The suggested key is `Alt+;` because desktop environments commonly reserve `Alt+Space`.
+
+- Type to search tool names, shortcuts, descriptions, categories, and plugin-local controls.
+- Up/Down selects a result and Enter runs it.
+- The selected row shows contextual details and the tool's important internal controls.
+- Press `?` for a compact everyday cheatsheet of toolbox shortcuts; Up/Down or PgUp/PgDn scrolls it when needed.
+- Number keys `1`–`0` retain the existing quick-run mappings when the search box is empty.
+- `zback` is shown for discoverability but remains shortcut-only on `Alt+B`, because opening the palette itself changes focus history.
+
+The goal is that `Alt+;` is the only toolbox shortcut you need to remember.
 
 ## Development
 

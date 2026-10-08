@@ -84,6 +84,21 @@ Qualified and runtime-verified on Midas while preserving the existing plugin UX:
 - stale restored marks remain visible and deletable but cannot trigger a blind offset jump;
 - keep live-mark offset fallback behavior for the current plugin instance.
 
+## Current development: toolbox home and cheatsheet
+
+Turn the existing command palette into the everyday front door for the toolbox:
+
+- keep `Alt+;` as the single memorable launcher;
+- search names, shortcuts, descriptions, categories, details, and plugin-local controls;
+- show a contextual details/control panel for the highlighted command;
+- add a `?` cheatsheet view with the complete everyday shortcut set;
+- make the cheatsheet scrollable without adding another global keybinding;
+- include `Alt+B`/zback as shortcut-only help because opening the palette changes focus history;
+- preserve existing quick-run digits and command activation behavior;
+- keep the milestone dependency-free and centralized in the existing command registry.
+
+PR #7 (zgrep fuzzy picker) remains held as a draft after partial runtime qualification; usability work is intentionally prioritized before resuming that experiment.
+
 ## Follow-up ideas
 
 ### zgrep
