@@ -350,7 +350,6 @@ impl State {
                 self.status.clear();
                 self.refresh_filter();
             }
-            BareKey::Char('h') if self.query.is_empty() => self.toggle_help(),
             BareKey::Char(c) if c.is_ascii_digit() && self.query.is_empty() => {
                 self.activate_quick(c);
             }
@@ -483,7 +482,7 @@ impl State {
             println!();
         }
 
-        println!("Type: filter   Up/Down: select   Enter: run   1-0: quick run   h/?: cheatsheet   Esc: close");
+        println!("Type: filter   Up/Down: select   Enter: run   1-0: quick run   ?: cheatsheet   Esc: close");
     }
 
     fn render_help(&self, rows: usize, cols: usize) {
