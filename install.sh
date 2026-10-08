@@ -180,7 +180,7 @@ Suggested keys:
   Alt+W          toggle/arm alert
   Alt+Shift+W    list alerts in this session
   Alt+Shift+B    broadcast command
-  Alt+;          command palette
+  Alt+;          toolbox home / command palette (? = cheatsheet)
 
 Native companions:
   $BIN_DIR/zellij-toolbox-alert list
