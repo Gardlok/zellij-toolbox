@@ -443,7 +443,10 @@ impl State {
                 } else {
                     " "
                 };
-                let quick = entry.quick.map(|key| key.to_string()).unwrap_or_else(|| "·".to_owned());
+                let quick = entry
+                    .quick
+                    .map(|key| key.to_string())
+                    .unwrap_or_else(|| "·".to_owned());
                 let prefix = format!(
                     "{} {}  {:<13} {:<13} ",
                     marker, quick, entry.name, entry.shortcut
@@ -482,7 +485,9 @@ impl State {
             println!();
         }
 
-        println!("Type: filter   Up/Down: select   Enter: run   1-0: quick run   ?: cheatsheet   Esc: close");
+        println!(
+            "Type: filter   Up/Down: select   Enter: run   1-0: quick run   ?: cheatsheet   Esc: close"
+        );
     }
 
     fn render_help(&self, rows: usize, cols: usize) {
